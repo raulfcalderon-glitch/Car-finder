@@ -1,0 +1,14 @@
+# One-click deploy on Render (render.com): New + → Blueprint → pick this repo.
+services:
+  - type: web
+    name: car-finder
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/me
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
