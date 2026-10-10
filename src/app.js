@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hashPassword, verifyPassword, newSessionToken } from './auth.js';
+import { newResponseEmail } from './email.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 const MAX_BODY_BYTES = 64 * 1024;
@@ -187,7 +188,7 @@ async function serveStatic(res, pathname) {
 
 // ---------- app ----------
 
-export function createApp(db, { secureCookies = false } = {}) {
+export function createApp(db, { secureCookies = false, sendEmail = async () => {}, appUrl = 'http://localhost:3000' } = {}) {
   const q = {
     accountByEmail: db.prepare('SELECT * FROM accounts WHERE email = ?'),
     accountBySession: db.prepare(
@@ -412,7 +413,12 @@ export function createApp(db, { secureCookies = false } = {}) {
       const message = str(body.message, 'Message', { required: true, max: 2000 });
       const price = int(body.price, 'Price', { min: 0, max: 100_000_000 });
       const { lastInsertRowid } = q.insertResponse.run(request.id, account.id, message, price);
-      sendJson(res, 201, { response: serializeResponse(q.responseById.get(lastInsertRowid)) });
+      const response = q.responseById.get(lastInsertRowid);
+      sendJson(res, 201, { response: serializeResponse(response) });
+
+      // Alert the buyer. Sent after replying so a slow or failing email never blocks the dealer.
+      const email = newResponseEmail({ request, response, dealer: account, buyer: q.accountById.get(request.user_id), appUrl });
+      sendEmail(email).catch((err) => console.error(`Failed to email ${email.to}:`, err.message));
     }],
 
     // --- shared ---

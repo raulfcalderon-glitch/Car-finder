@@ -6,9 +6,18 @@ import { createApp } from '../src/app.js';
 
 let server;
 let base;
+const sentEmails = [];
+let failNextEmail = false;
 
 before(async () => {
-  server = createServer(createApp(openDatabase(':memory:')));
+  const sendEmail = async (email) => {
+    if (failNextEmail) {
+      failNextEmail = false;
+      throw new Error('mail provider down');
+    }
+    sentEmails.push(email);
+  };
+  server = createServer(createApp(openDatabase(':memory:'), { sendEmail, appUrl: 'https://cars.test' }));
   await new Promise((resolve) => server.listen(0, resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -171,4 +180,31 @@ test('serves the app and blocks path traversal', async () => {
   assert.match(await res.text(), /Car Finder/);
   const traversal = await fetch(`${base}/..%2fsrc%2fapp.js`);
   assert.doesNotMatch(await traversal.text(), /createApp/);
+});
+
+test('buyer gets an email when a dealer responds', async () => {
+  const user = await signup('user', { email: 'alerts@test.com', name: 'Casey Jones' });
+  const dealer = await signup('dealer', { email: 'sales@motors.test', businessName: 'Motors <b>& Co</b>', phone: '555-0199' });
+  const { body } = await user('POST', '/api/requests', { make: 'Porsche', model: '911 Carrera', yearMin: 1987, yearMax: 1987 });
+  const id = body.request.id;
+
+  sentEmails.length = 0;
+  await dealer('POST', `/api/requests/${id}/responses`, { message: 'Have one <script>', price: 87500 });
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(sentEmails.length, 1);
+  const [email] = sentEmails;
+  assert.equal(email.to, 'alerts@test.com');
+  assert.equal(email.replyTo, 'sales@motors.test');
+  assert.equal(email.subject, 'Motors <b>& Co</b> responded to your 1987 Porsche 911 Carrera request');
+  assert.match(email.text, /Hi Casey,/);
+  assert.match(email.text, /\$87,500/);
+  assert.match(email.text, /555-0199/);
+  assert.match(email.text, new RegExp(`https://cars.test/#/request/${id}`));
+  assert.match(email.html, /Motors &lt;b&gt;&amp; Co&lt;\/b&gt;/, 'dealer-supplied text is escaped in HTML');
+  assert.doesNotMatch(email.html, /<script>/);
+
+  failNextEmail = true;
+  const res = await dealer('POST', `/api/requests/${id}/responses`, { message: 'Second offer' });
+  assert.equal(res.status, 201, 'email failure does not fail the response');
 });

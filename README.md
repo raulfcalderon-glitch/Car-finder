@@ -4,7 +4,7 @@ A two-sided marketplace for hard-to-find vehicles.
 
 - **Users** (buyers) post a request for the exact car they want — e.g. a 1987 Porsche 911 Carrera — with year range, budget, condition, color, location and notes.
 - **Dealers** (specialty dealerships, brokers, people in the car business) browse every open request in a searchable, sortable list and respond with what they have and an asking price.
-- Buyers see each dealer's response along with the dealer's contact details. Dealers only see a buyer's first name and only their own responses, not competitors'.
+- Buyers get an **email alert** when a dealer responds, and see each response with the dealer's contact details. Dealers only see a buyer's first name and only their own responses, not competitors'.
 
 ## Run it
 
@@ -16,7 +16,12 @@ npm start      # http://localhost:3000
 npm test
 ```
 
-Environment variables: `PORT` (default 3000), `DATABASE_FILE` (default `data/car-finder.db`), `NODE_ENV=production` to mark the session cookie `Secure`.
+Environment variables:
+
+- `PORT` (default 3000), `DATABASE_FILE` (default `data/car-finder.db`), `NODE_ENV=production` to mark the session cookie `Secure`.
+- `RESEND_API_KEY` – API key from [Resend](https://resend.com) for email alerts. Without it, emails are printed to the server log instead of sent.
+- `EMAIL_FROM` – sender, e.g. `Car Finder <alerts@yourdomain.com>` (default `Car Finder <onboarding@resend.dev>`, Resend's test sender, which can only deliver to your own Resend account's email until you verify a domain).
+- `APP_URL` – public address used for links in emails (defaults to Render's `RENDER_EXTERNAL_URL`).
 
 ## How it's built
 
@@ -24,6 +29,7 @@ Environment variables: `PORT` (default 3000), `DATABASE_FILE` (default `data/car
 - `src/app.js` – JSON API and static file serving (Node's built-in `http`, no framework).
 - `src/db.js` – SQLite schema via Node's built-in `node:sqlite`: `accounts`, `sessions`, `requests`, `responses`.
 - `src/auth.js` – scrypt password hashing and session tokens (HttpOnly cookie).
+- `src/email.js` – email alerts via Resend's HTTP API.
 - `public/` – the single-page front end in plain HTML/CSS/JS.
 - `test/` – API tests using `node:test`.
 
@@ -45,7 +51,7 @@ Environment variables: `PORT` (default 3000), `DATABASE_FILE` (default `data/car
 
 ## Ideas for next steps
 
-- Email/SMS notifications to buyers when a dealer responds, and to dealers when a request matches a saved search.
+- Email alerts to dealers when a new request matches a saved search; SMS alerts.
 - Dealer verification before they can respond.
 - Photos on dealer responses, and in-app messaging instead of sharing contact details.
 - Deploy behind HTTPS (e.g. Fly.io, Render, Railway) with a persistent volume for the SQLite file, or move to Postgres.

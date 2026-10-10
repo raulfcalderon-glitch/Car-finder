@@ -12,3 +12,6 @@ services:
         value: "22"
       - key: NODE_ENV
         value: production
+      # Email alerts: paste your Resend API key in the Render dashboard (Environment tab).
+      - key: RESEND_API_KEY
+        sync: false
