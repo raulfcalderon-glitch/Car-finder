@@ -1,12 +1,22 @@
 import { createServer } from 'node:http';
+import { existsSync } from 'node:fs';
 import { openDatabase } from './db.js';
 import { createApp } from './app.js';
 import { createMailer } from './email.js';
 
 const port = Number(process.env.PORT ?? 3000);
-const dbFile = process.env.DATABASE_FILE ?? 'data/car-finder.db';
+// Render persistent disks are mounted at /var/data. Use it automatically when present, so data
+// survives restarts and deploys even if DATABASE_FILE was never set.
+const PERSISTENT_DIR = '/var/data';
+const dbFile =
+  process.env.DATABASE_FILE ?? (existsSync(PERSISTENT_DIR) ? `${PERSISTENT_DIR}/car-finder.db` : 'data/car-finder.db');
 
 const db = openDatabase(dbFile);
+const accounts = db.prepare('SELECT COUNT(*) AS n FROM accounts').get().n;
+const onDisk = dbFile.startsWith(`${PERSISTENT_DIR}/`);
+// Render sets RENDER=true; warn there, since anything outside the disk is wiped on every restart.
+const warning = process.env.RENDER && !onDisk ? ' — WARNING: not on a persistent disk, data will be lost on restart' : '';
+console.log(`Database: ${dbFile} (${accounts} accounts)${warning}`);
 const app = createApp(db, {
   secureCookies: process.env.NODE_ENV === 'production',
   // Render sets RENDER_EXTERNAL_URL automatically; APP_URL overrides it (e.g. for a custom domain).

@@ -18,7 +18,7 @@ npm test
 
 Environment variables:
 
-- `PORT` (default 3000), `DATABASE_FILE` (default `data/car-finder.db`), `NODE_ENV=production` to mark the session cookie `Secure`.
+- `PORT` (default 3000), `DATABASE_FILE` (default `/var/data/car-finder.db` when a Render disk is mounted at `/var/data`, otherwise `data/car-finder.db`), `NODE_ENV=production` to mark the session cookie `Secure`.
 - `RESEND_API_KEY` – API key from [Resend](https://resend.com) for email alerts. Without it, emails are printed to the server log instead of sent.
 - `EMAIL_FROM` – sender, e.g. `Car Finder <alerts@yourdomain.com>` (default `Car Finder <onboarding@resend.dev>`, Resend's test sender, which can only deliver to your own Resend account's email until you verify a domain).
 - `APP_URL` – public address used for links in emails (defaults to Render's `RENDER_EXTERNAL_URL`).

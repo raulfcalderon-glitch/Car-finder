@@ -3,15 +3,22 @@ services:
   - type: web
     name: car-finder
     runtime: node
-    plan: free
+    plan: starter # "0.5c-512mb" in the dashboard; paid plans are needed for a persistent disk
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/me
+    # Accounts and requests live in a SQLite file on this disk so they survive restarts and deploys.
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "22"
       - key: NODE_ENV
         value: production
+      - key: DATABASE_FILE
+        value: /var/data/car-finder.db
       # Email alerts: paste your Resend API key in the Render dashboard (Environment tab).
       - key: RESEND_API_KEY
         sync: false
