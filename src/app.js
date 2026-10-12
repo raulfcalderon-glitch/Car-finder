@@ -88,15 +88,24 @@ function parseRequestFields(body) {
 
 // ---------- serializers ----------
 
-function serializeDealer(a) {
+// Full account details, for admin screens only.
+function serializeAdminAccount(a, isAdmin) {
   return {
     id: a.id,
     email: a.email,
     name: a.name,
+    role: a.role,
     businessName: a.business_name,
     phone: a.phone,
     status: a.status,
+    frozen: Boolean(a.frozen_at),
+    frozenAt: a.frozen_at,
+    frozenReason: a.frozen_reason,
+    lastLoginAt: a.last_login_at,
     createdAt: a.created_at,
+    isAdmin,
+    requestCount: a.request_count ?? undefined,
+    openRequestCount: a.open_request_count ?? undefined,
     responseCount: a.response_count ?? undefined,
   };
 }
@@ -198,6 +207,21 @@ async function serveStatic(res, pathname) {
 // ---------- app ----------
 
 const ACCOUNT_STATUSES = ['active', 'pending', 'rejected'];
+const ACCOUNT_FILTERS = ['all', 'active', 'pending', 'rejected', 'frozen'];
+
+const ACCOUNT_SORTS = {
+  newest: 'a.created_at DESC, a.id DESC',
+  oldest: 'a.created_at ASC, a.id ASC',
+  name: 'COALESCE(a.business_name, a.name) COLLATE NOCASE ASC, a.id ASC',
+  last_login: 'a.last_login_at IS NULL, a.last_login_at DESC, a.id DESC',
+  activity: 'request_count + response_count DESC, a.created_at DESC',
+};
+
+// Per-account activity counts, used by the admin lists and detail page.
+const ACCOUNT_COUNTS = `
+  (SELECT COUNT(*) FROM requests r WHERE r.user_id = a.id) AS request_count,
+  (SELECT COUNT(*) FROM requests r WHERE r.user_id = a.id AND r.status = 'open') AS open_request_count,
+  (SELECT COUNT(*) FROM responses x WHERE x.dealer_id = a.id) AS response_count`;
 
 export function createApp(
   db,
@@ -227,16 +251,29 @@ export function createApp(
   const q = {
     accountByEmail: db.prepare('SELECT * FROM accounts WHERE email = ?'),
     accountBySession: db.prepare(
-      'SELECT a.* FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token = ?',
+      'SELECT a.* FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token = ? AND a.frozen_at IS NULL',
     ),
     insertAccount: db.prepare(
       'INSERT INTO accounts (email, password_hash, name, role, business_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
     ),
-    dealersByStatus: db.prepare(`
-      SELECT a.*, (SELECT COUNT(*) FROM responses x WHERE x.dealer_id = a.id) AS response_count
-      FROM accounts a WHERE a.role = 'dealer' AND a.status = ? ORDER BY a.created_at DESC, a.id DESC`),
-    dealerCounts: db.prepare("SELECT status, COUNT(*) AS n FROM accounts WHERE role = 'dealer' GROUP BY status"),
     setAccountStatus: db.prepare('UPDATE accounts SET status = ? WHERE id = ?'),
+    freezeAccount: db.prepare("UPDATE accounts SET frozen_at = datetime('now'), frozen_reason = ? WHERE id = ?"),
+    unfreezeAccount: db.prepare('UPDATE accounts SET frozen_at = NULL, frozen_reason = NULL WHERE id = ?'),
+    deleteSessionsFor: db.prepare('DELETE FROM sessions WHERE account_id = ?'),
+    touchLogin: db.prepare("UPDATE accounts SET last_login_at = datetime('now') WHERE id = ?"),
+    adminAccountById: db.prepare(`SELECT a.*, ${ACCOUNT_COUNTS} FROM accounts a WHERE a.id = ?`),
+    adminRequestsByUser: db.prepare(`
+      SELECT r.*, (SELECT COUNT(*) FROM responses x WHERE x.request_id = r.id) AS response_count
+      FROM requests r WHERE r.user_id = ? ORDER BY r.created_at DESC, r.id DESC`),
+    adminResponsesByDealer: db.prepare(`
+      SELECT x.*, r.make, r.model, r.trim, r.year_min, r.year_max, r.status AS request_status
+      FROM responses x JOIN requests r ON r.id = x.request_id
+      WHERE x.dealer_id = ? ORDER BY x.created_at DESC, x.id DESC`),
+    adminResponsesForRequest: db.prepare(`
+      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone,
+        a.frozen_at AS dealer_frozen_at
+      FROM responses x JOIN accounts a ON a.id = x.dealer_id
+      WHERE x.request_id = ? ORDER BY x.created_at ASC, x.id ASC`),
     accountById: db.prepare('SELECT * FROM accounts WHERE id = ?'),
     insertSession: db.prepare('INSERT INTO sessions (token, account_id) VALUES (?, ?)'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
@@ -249,15 +286,15 @@ export function createApp(
       WHERE id = :id`),
     updateStatus: db.prepare('UPDATE requests SET status = ? WHERE id = ?'),
     requestById: db.prepare(`
-      SELECT r.*, a.name AS requester_name,
-        (SELECT COUNT(*) FROM responses x WHERE x.request_id = r.id) AS response_count
+      SELECT r.*, a.name AS requester_name, a.email AS requester_email, a.frozen_at AS requester_frozen_at,
+        (SELECT COUNT(*) FROM visible_responses x WHERE x.request_id = r.id) AS response_count
       FROM requests r JOIN accounts a ON a.id = r.user_id WHERE r.id = ?`),
     requestsByUser: db.prepare(`
-      SELECT r.*, (SELECT COUNT(*) FROM responses x WHERE x.request_id = r.id) AS response_count
+      SELECT r.*, (SELECT COUNT(*) FROM visible_responses x WHERE x.request_id = r.id) AS response_count
       FROM requests r WHERE r.user_id = ? ORDER BY r.created_at DESC, r.id DESC`),
     responsesForRequest: db.prepare(`
       SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone
-      FROM responses x JOIN accounts a ON a.id = x.dealer_id
+      FROM visible_responses x JOIN accounts a ON a.id = x.dealer_id
       WHERE x.request_id = ? ORDER BY x.created_at ASC, x.id ASC`),
     responsesForRequestByDealer: db.prepare(`
       SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone
@@ -268,7 +305,7 @@ export function createApp(
       SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone
       FROM responses x JOIN accounts a ON a.id = x.dealer_id WHERE x.id = ?`),
     distinctMakes: db.prepare(
-      "SELECT DISTINCT make FROM requests WHERE status = 'open' ORDER BY make COLLATE NOCASE",
+      "SELECT DISTINCT make FROM visible_requests WHERE status = 'open' ORDER BY make COLLATE NOCASE",
     ),
   };
 
@@ -300,13 +337,60 @@ export function createApp(
   function startSession(res, accountId, status, payload) {
     const token = newSessionToken();
     q.insertSession.run(token, accountId);
+    q.touchLogin.run(accountId);
     sendJson(res, status, payload, { 'Set-Cookie': sessionCookie(token, { secure: secureCookies }) });
   }
 
-  function loadRequest(id) {
+  // Requests from frozen accounts don't exist as far as dealers are concerned; admins still see them.
+  function loadRequest(id, { includeFrozen = false } = {}) {
     const row = q.requestById.get(id);
-    if (!row) throw new HttpError(404, 'Request not found');
+    if (!row || (row.requester_frozen_at && !includeFrozen)) throw new HttpError(404, 'Request not found');
     return row;
+  }
+
+  function adminAccountPayload(id) {
+    const account = q.adminAccountById.get(id);
+    if (!account) throw new HttpError(404, 'Account not found');
+    return serializeAdminAccount(account, isAdmin(account));
+  }
+
+  // Admin list of users or dealers, with search, status filter and sorting.
+  function searchAccounts(params) {
+    const role = oneOf(params.get('role') || undefined, 'role', ['user', 'dealer'], 'dealer');
+    const status = oneOf(params.get('status') || undefined, 'status', ACCOUNT_FILTERS, 'all');
+    const sortKey = oneOf(params.get('sort') || undefined, 'sort', Object.keys(ACCOUNT_SORTS), 'newest');
+    const where = ['a.role = :role'];
+    const args = { role };
+
+    if (status === 'frozen') where.push('a.frozen_at IS NOT NULL');
+    else if (status !== 'all') {
+      where.push('a.frozen_at IS NULL AND a.status = :status');
+      args.status = status;
+    }
+    const text = str(params.get('q'), 'q', { max: 100 });
+    if (text) {
+      where.push("(a.name LIKE :text ESCAPE '\\' OR a.email LIKE :text ESCAPE '\\' OR a.business_name LIKE :text ESCAPE '\\' OR a.phone LIKE :text ESCAPE '\\')");
+      args.text = `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    }
+
+    const rows = db
+      .prepare(`SELECT a.*, ${ACCOUNT_COUNTS} FROM accounts a WHERE ${where.join(' AND ')} ORDER BY ${ACCOUNT_SORTS[sortKey]} LIMIT 500`)
+      .all(args);
+    return { role, status, sort: sortKey, accounts: rows.map((a) => serializeAdminAccount(a, isAdmin(a))) };
+  }
+
+  function adminStats() {
+    const one = (sql) => db.prepare(sql).get().n;
+    return {
+      users: one("SELECT COUNT(*) AS n FROM accounts WHERE role = 'user'"),
+      dealersApproved: one("SELECT COUNT(*) AS n FROM accounts WHERE role = 'dealer' AND status = 'active' AND frozen_at IS NULL"),
+      dealersPending: one("SELECT COUNT(*) AS n FROM accounts WHERE role = 'dealer' AND status = 'pending' AND frozen_at IS NULL"),
+      frozen: one('SELECT COUNT(*) AS n FROM accounts WHERE frozen_at IS NOT NULL'),
+      openRequests: one("SELECT COUNT(*) AS n FROM visible_requests WHERE status = 'open'"),
+      requestsLast7Days: one("SELECT COUNT(*) AS n FROM requests WHERE created_at >= datetime('now', '-7 days')"),
+      responsesLast7Days: one("SELECT COUNT(*) AS n FROM responses WHERE created_at >= datetime('now', '-7 days')"),
+      newAccountsLast7Days: one("SELECT COUNT(*) AS n FROM accounts WHERE created_at >= datetime('now', '-7 days')"),
+    };
   }
 
   // Dealer-facing search over open requests.
@@ -364,12 +448,12 @@ export function createApp(
     const offset = int(params.get('offset'), 'offset', { min: 0 }) ?? 0;
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const total = db.prepare(`SELECT COUNT(*) AS n FROM requests r ${whereSql}`).get(args).n;
+    const total = db.prepare(`SELECT COUNT(*) AS n FROM visible_requests r ${whereSql}`).get(args).n;
     const rows = db
       .prepare(`
         SELECT r.*, a.name AS requester_name,
-          (SELECT COUNT(*) FROM responses x WHERE x.request_id = r.id) AS response_count
-        FROM requests r JOIN accounts a ON a.id = r.user_id
+          (SELECT COUNT(*) FROM visible_responses x WHERE x.request_id = r.id) AS response_count
+        FROM visible_requests r JOIN accounts a ON a.id = r.user_id
         ${whereSql}
         ORDER BY ${SORTS[sortKey]}
         LIMIT :limit OFFSET :offset`)
@@ -408,6 +492,7 @@ export function createApp(
       if (!account || !verifyPassword(String(body.password ?? ''), account.password_hash)) {
         throw new HttpError(401, 'Incorrect email or password');
       }
+      if (account.frozen_at) throw new HttpError(403, 'This account has been frozen. Please contact CarsFindMe support.');
       startSession(res, account.id, 200, { account: publicAccount(account) });
     }],
 
@@ -478,39 +563,96 @@ export function createApp(
 
     // --- admin ---
 
-    ['GET', /^\/api\/admin\/dealers$/, async (req, res, _m, url) => {
+    ['GET', /^\/api\/admin\/stats$/, async (req, res) => {
       requireAdmin(req);
-      const status = oneOf(url.searchParams.get('status') || undefined, 'status', ACCOUNT_STATUSES, 'pending');
-      const counts = Object.fromEntries(ACCOUNT_STATUSES.map((s) => [s, 0]));
-      for (const row of q.dealerCounts.all()) counts[row.status] = row.n;
-      sendJson(res, 200, { status, counts, dealers: q.dealersByStatus.all(status).map(serializeDealer) });
+      sendJson(res, 200, { stats: adminStats() });
     }],
 
-    ['PATCH', /^\/api\/admin\/dealers\/(\d+)$/, async (req, res, [id]) => {
+    ['GET', /^\/api\/admin\/accounts$/, async (req, res, _m, url) => {
       requireAdmin(req);
-      const dealer = q.accountById.get(Number(id));
-      if (!dealer || dealer.role !== 'dealer') throw new HttpError(404, 'Dealer not found');
-      const status = oneOf((await readJson(req)).status, 'Status', ACCOUNT_STATUSES, null);
+      sendJson(res, 200, searchAccounts(url.searchParams));
+    }],
+
+    ['GET', /^\/api\/admin\/accounts\/(\d+)$/, async (req, res, [id]) => {
+      requireAdmin(req);
+      const account = adminAccountPayload(Number(id));
+      const requests = account.role === 'user' ? q.adminRequestsByUser.all(account.id).map(serializeRequest) : [];
+      const responses =
+        account.role === 'dealer'
+          ? q.adminResponsesByDealer.all(account.id).map((x) => ({
+              id: x.id,
+              requestId: x.request_id,
+              message: x.message,
+              price: x.price,
+              createdAt: x.created_at,
+              request: serializeRequest({ ...x, id: x.request_id, status: x.request_status, created_at: undefined }),
+            }))
+          : [];
+      sendJson(res, 200, { account, requests, responses });
+    }],
+
+    // Approve / reject a dealer, and freeze / unfreeze any account.
+    ['PATCH', /^\/api\/admin\/accounts\/(\d+)$/, async (req, res, [id]) => {
+      const me = requireAdmin(req);
+      const target = q.accountById.get(Number(id));
+      if (!target) throw new HttpError(404, 'Account not found');
+      const body = await readJson(req);
+
+      if (body.status !== undefined) {
+        if (target.role !== 'dealer') throw new HttpError(400, 'Only dealer accounts have an approval status');
+        q.setAccountStatus.run(oneOf(body.status, 'Status', ACCOUNT_STATUSES, target.status), target.id);
+      }
+      if (body.frozen === true) {
+        if (target.id === me.id || isAdmin(target)) throw new HttpError(400, "Admin accounts can't be frozen");
+        q.freezeAccount.run(str(body.reason, 'Reason', { max: 500 }), target.id);
+        q.deleteSessionsFor.run(target.id); // signs them out everywhere
+      } else if (body.frozen === false) {
+        q.unfreezeAccount.run(target.id);
+      }
+
+      sendJson(res, 200, { account: adminAccountPayload(target.id) });
+      if (body.status === 'active' && target.status !== 'active') notify(dealerApprovedEmail({ dealer: target, appUrl }));
+    }],
+
+    ['PATCH', /^\/api\/admin\/requests\/(\d+)$/, async (req, res, [id]) => {
+      requireAdmin(req);
+      const request = loadRequest(Number(id), { includeFrozen: true });
+      const status = oneOf((await readJson(req)).status, 'Status', STATUSES, null);
       if (!status) throw new HttpError(400, 'Status is required');
-      q.setAccountStatus.run(status, dealer.id);
-      sendJson(res, 200, { dealer: serializeDealer(q.accountById.get(dealer.id)) });
-      if (status === 'active' && dealer.status !== 'active') notify(dealerApprovedEmail({ dealer, appUrl }));
+      q.updateStatus.run(status, request.id);
+      sendJson(res, 200, { request: serializeRequest(loadRequest(request.id, { includeFrozen: true })) });
     }],
 
     // --- shared ---
 
     ['GET', /^\/api\/requests\/(\d+)$/, async (req, res, [id]) => {
       const account = requireAccount(req);
-      const request = loadRequest(Number(id));
+      const admin = isAdmin(account);
+      const request = loadRequest(Number(id), { includeFrozen: admin });
+      let viewer;
       let responses;
-      if (account.role === 'user') {
-        if (request.user_id !== account.id) throw new HttpError(404, 'Request not found');
-        responses = q.responsesForRequest.all(request.id);
-      } else {
+      if (account.role === 'user' && request.user_id === account.id) {
+        viewer = 'owner';
+        responses = q.responsesForRequest.all(request.id).map(serializeResponse);
+      } else if (admin) {
+        // Admins see every response, including ones hidden because the dealer is frozen.
+        viewer = 'admin';
+        responses = q.adminResponsesForRequest.all(request.id).map((x) => ({
+          ...serializeResponse(x),
+          dealerFrozen: Boolean(x.dealer_frozen_at),
+        }));
+      } else if (account.role === 'dealer') {
         // Dealers see only their own replies, not competitors'.
-        responses = q.responsesForRequestByDealer.all(request.id, account.id);
+        viewer = 'dealer';
+        responses = q.responsesForRequestByDealer.all(request.id, account.id).map(serializeResponse);
+      } else {
+        throw new HttpError(404, 'Request not found');
       }
-      sendJson(res, 200, { request: serializeRequest(request), responses: responses.map(serializeResponse) });
+      const payload = serializeRequest(request);
+      if (viewer === 'admin') {
+        payload.requester = { id: request.user_id, name: request.requester_name, email: request.requester_email, frozen: Boolean(request.requester_frozen_at) };
+      }
+      sendJson(res, 200, { viewer, request: payload, responses });
     }],
   ];
 

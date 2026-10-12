@@ -68,7 +68,7 @@ async function signup(role, { approve = true, ...extra } = {}) {
   assert.equal(res.status, 201, JSON.stringify(res.body));
   call.account = res.body.account;
   if (role === 'dealer' && approve) {
-    const approved = await (await admin())('PATCH', `/api/admin/dealers/${call.account.id}`, { status: 'active' });
+    const approved = await (await admin())('PATCH', `/api/admin/accounts/${call.account.id}`, { status: 'active' });
     assert.equal(approved.status, 200, JSON.stringify(approved.body));
   }
   return call;
@@ -253,21 +253,23 @@ test('new dealers wait for admin approval before seeing requests', async () => {
   assert.equal((await dealer('POST', '/api/requests/1/responses', { message: 'hi' })).status, 403);
 
   // Only admins can see and manage dealers.
-  assert.equal((await buyer('GET', '/api/admin/dealers')).status, 403);
-  assert.equal((await client()('GET', '/api/admin/dealers')).status, 401);
-  assert.equal((await buyer('PATCH', `/api/admin/dealers/${dealer.account.id}`, { status: 'active' })).status, 403);
+  for (const path of ['/api/admin/accounts', '/api/admin/stats', `/api/admin/accounts/${dealer.account.id}`]) {
+    assert.equal((await buyer('GET', path)).status, 403, path);
+    assert.equal((await client()('GET', path)).status, 401, path);
+  }
+  assert.equal((await buyer('PATCH', `/api/admin/accounts/${dealer.account.id}`, { status: 'active' })).status, 403);
 
-  const pending = await adminCall('GET', '/api/admin/dealers');
+  const pending = await adminCall('GET', '/api/admin/accounts?role=dealer&status=pending');
   assert.equal(pending.status, 200);
-  assert.ok(pending.body.dealers.some((d) => d.email === 'rally@test.com'));
-  assert.ok(pending.body.counts.pending >= 1);
+  assert.ok(pending.body.accounts.some((d) => d.email === 'rally@test.com'));
+  assert.ok((await adminCall('GET', '/api/admin/stats')).body.stats.dealersPending >= 1);
   assert.equal((await adminCall('GET', '/api/me')).body.account.isAdmin, true);
-  assert.equal((await adminCall('PATCH', `/api/admin/dealers/${buyer.account.id}`, { status: 'active' })).status, 404, 'buyers are not dealers');
-  assert.equal((await adminCall('PATCH', `/api/admin/dealers/${dealer.account.id}`, { status: 'bogus' })).status, 400);
+  assert.equal((await adminCall('PATCH', `/api/admin/accounts/${buyer.account.id}`, { status: 'active' })).status, 400, 'buyers have no approval status');
+  assert.equal((await adminCall('PATCH', `/api/admin/accounts/${dealer.account.id}`, { status: 'bogus' })).status, 400);
 
   // Approving lets them in and emails them.
   sentEmails.length = 0;
-  assert.equal((await adminCall('PATCH', `/api/admin/dealers/${dealer.account.id}`, { status: 'active' })).body.dealer.status, 'active');
+  assert.equal((await adminCall('PATCH', `/api/admin/accounts/${dealer.account.id}`, { status: 'active' })).body.account.status, 'active');
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(sentEmails.length, 1);
   assert.equal(sentEmails[0].to, 'rally@test.com');
@@ -276,15 +278,15 @@ test('new dealers wait for admin approval before seeing requests', async () => {
 
   // Revoking cuts access again, without another email.
   sentEmails.length = 0;
-  await adminCall('PATCH', `/api/admin/dealers/${dealer.account.id}`, { status: 'rejected' });
+  await adminCall('PATCH', `/api/admin/accounts/${dealer.account.id}`, { status: 'rejected' });
   const blocked = await dealer('GET', '/api/requests');
   assert.equal(blocked.status, 403);
   assert.match(blocked.body.error, /not approved/);
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(sentEmails.length, 0);
 
-  const rejected = await adminCall('GET', '/api/admin/dealers?status=rejected');
-  assert.ok(rejected.body.dealers.some((d) => d.email === 'rally@test.com'));
+  const rejected = await adminCall('GET', '/api/admin/accounts?role=dealer&status=rejected');
+  assert.ok(rejected.body.accounts.some((d) => d.email === 'rally@test.com'));
 });
 
 test('an admin who signs up as a dealer is approved automatically', async () => {
@@ -312,7 +314,112 @@ test('upgrading an existing database keeps existing dealers approved', async () 
   old.close();
 
   const db = openDatabase(file);
-  assert.equal(db.prepare("SELECT status FROM accounts WHERE email = 'old@dealer.com'").get().status, 'active');
+  const row = db.prepare("SELECT status, frozen_at, last_login_at FROM accounts WHERE email = 'old@dealer.com'").get();
+  assert.equal(row.status, 'active');
+  assert.equal(row.frozen_at, null);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM visible_requests').get().n, 0, 'views exist');
   db.close();
   openDatabase(file).close(); // running the migration twice is harmless
+});
+
+test('admins can list, search and inspect users and dealers', async () => {
+  const adminCall = await admin();
+  const buyer = await signup('user', { name: 'Quinn Searchable', email: 'quinn@search.test', phone: '555-0177' });
+  const dealer = await signup('dealer', { businessName: 'Searchable Motors', email: 'sm@search.test' });
+  const { body } = await buyer('POST', '/api/requests', { make: 'BMW', model: 'M3 CSL' });
+  await dealer('POST', `/api/requests/${body.request.id}/responses`, { message: 'Have one', price: 120000 });
+
+  const users = await adminCall('GET', '/api/admin/accounts?role=user&q=searchable');
+  assert.equal(users.status, 200);
+  assert.deepEqual(users.body.accounts.map((a) => a.email), ['quinn@search.test']);
+  const [quinn] = users.body.accounts;
+  assert.equal(quinn.requestCount, 1);
+  assert.equal(quinn.openRequestCount, 1);
+  assert.ok(quinn.lastLoginAt, 'signing up counts as a login');
+  assert.equal(quinn.frozen, false);
+
+  const byPhone = await adminCall('GET', '/api/admin/accounts?role=user&q=555-0177');
+  assert.equal(byPhone.body.accounts.length, 1);
+  const dealers = await adminCall('GET', '/api/admin/accounts?role=dealer&q=Searchable%20Motors&sort=activity');
+  assert.equal(dealers.body.accounts[0].responseCount, 1);
+  assert.equal((await adminCall('GET', '/api/admin/accounts?sort=bogus')).status, 400);
+
+  const userDetail = await adminCall('GET', `/api/admin/accounts/${buyer.account.id}`);
+  assert.equal(userDetail.body.account.phone, '555-0177');
+  assert.equal(userDetail.body.requests[0].model, 'M3 CSL');
+  const dealerDetail = await adminCall('GET', `/api/admin/accounts/${dealer.account.id}`);
+  assert.equal(dealerDetail.body.responses[0].price, 120000);
+  assert.equal(dealerDetail.body.responses[0].request.model, 'M3 CSL');
+  assert.equal((await adminCall('GET', '/api/admin/accounts/999999')).status, 404);
+
+  // Admins can open any request, see every response with contacts, and close it.
+  const asAdmin = await adminCall('GET', `/api/requests/${body.request.id}`);
+  assert.equal(asAdmin.body.viewer, 'admin');
+  assert.equal(asAdmin.body.request.requester.email, 'quinn@search.test');
+  assert.equal(asAdmin.body.responses[0].dealer.email, 'sm@search.test');
+  const closed = await adminCall('PATCH', `/api/admin/requests/${body.request.id}`, { status: 'closed' });
+  assert.equal(closed.body.request.status, 'closed');
+  assert.equal((await buyer('PATCH', `/api/admin/requests/${body.request.id}`, { status: 'open' })).status, 403);
+  assert.equal((await buyer('GET', `/api/requests/${body.request.id}`)).body.viewer, 'owner');
+});
+
+test('freezing a user signs them out, blocks login and hides their requests', async () => {
+  const adminCall = await admin();
+  const buyer = await signup('user', { email: 'frozen-buyer@test.com' });
+  const dealer = await signup('dealer');
+  const { body } = await buyer('POST', '/api/requests', { make: 'Ferrari', model: 'F40 Frozen' });
+  const id = body.request.id;
+  assert.equal((await dealer('GET', '/api/requests?q=Frozen')).body.total, 1);
+
+  const frozen = await adminCall('PATCH', `/api/admin/accounts/${buyer.account.id}`, { frozen: true, reason: 'Spam' });
+  assert.equal(frozen.body.account.frozen, true);
+  assert.equal(frozen.body.account.frozenReason, 'Spam');
+
+  assert.equal((await buyer('GET', '/api/me')).body.account, null, 'existing session is ended');
+  assert.equal((await buyer('GET', '/api/my/requests')).status, 401);
+  const login = await client()('POST', '/api/login', { email: 'frozen-buyer@test.com', password: 'password123' });
+  assert.equal(login.status, 403);
+  assert.match(login.body.error, /frozen/);
+
+  assert.equal((await dealer('GET', '/api/requests?q=Frozen')).body.total, 0, 'hidden from dealer search');
+  assert.equal((await dealer('GET', `/api/requests/${id}`)).status, 404);
+  assert.equal((await dealer('POST', `/api/requests/${id}/responses`, { message: 'hi' })).status, 404);
+  assert.ok(!(await dealer('GET', '/api/makes')).body.makes.includes('Ferrari'), 'make filter skips frozen requests');
+  assert.equal((await adminCall('GET', `/api/requests/${id}`)).body.request.requester.frozen, true, 'admins still see it');
+  assert.ok((await adminCall('GET', '/api/admin/accounts?role=user&status=frozen')).body.accounts.some((a) => a.email === 'frozen-buyer@test.com'));
+  assert.ok(!(await adminCall('GET', '/api/admin/accounts?role=user&status=active')).body.accounts.some((a) => a.email === 'frozen-buyer@test.com'));
+
+  await adminCall('PATCH', `/api/admin/accounts/${buyer.account.id}`, { frozen: false });
+  const again = client();
+  assert.equal((await again('POST', '/api/login', { email: 'frozen-buyer@test.com', password: 'password123' })).status, 200);
+  assert.equal((await dealer('GET', '/api/requests?q=Frozen')).body.total, 1, 'visible again after unfreezing');
+});
+
+test("freezing a dealer hides their responses from buyers; admins can't be frozen", async () => {
+  const adminCall = await admin();
+  const buyer = await signup('user');
+  const good = await signup('dealer', { businessName: 'Good Cars' });
+  const bad = await signup('dealer', { businessName: 'Shady Cars' });
+  const { body } = await buyer('POST', '/api/requests', { make: 'Porsche', model: '993 Turbo' });
+  const id = body.request.id;
+  await good('POST', `/api/requests/${id}/responses`, { message: 'Legit offer' });
+  await bad('POST', `/api/requests/${id}/responses`, { message: 'Wire me a deposit' });
+  assert.equal((await buyer('GET', `/api/requests/${id}`)).body.responses.length, 2);
+
+  await adminCall('PATCH', `/api/admin/accounts/${bad.account.id}`, { frozen: true });
+  const view = await buyer('GET', `/api/requests/${id}`);
+  assert.deepEqual(view.body.responses.map((x) => x.message), ['Legit offer']);
+  assert.equal(view.body.request.responseCount, 1);
+  assert.equal((await buyer('GET', '/api/my/requests')).body.requests.find((r) => r.id === id).responseCount, 1);
+  assert.equal((await bad('GET', '/api/requests')).status, 401, 'frozen dealer is signed out');
+
+  const adminView = await adminCall('GET', `/api/requests/${id}`);
+  assert.equal(adminView.body.responses.length, 2);
+  assert.equal(adminView.body.responses.find((x) => x.message.startsWith('Wire')).dealerFrozen, true);
+
+  const adminAccount = (await adminCall('GET', '/api/me')).body.account;
+  const self = await adminCall('PATCH', `/api/admin/accounts/${adminAccount.id}`, { frozen: true });
+  assert.equal(self.status, 400);
+  assert.match(self.body.error, /can't be frozen/);
+  assert.ok((await adminCall('GET', '/api/admin/stats')).body.stats.frozen >= 1);
 });

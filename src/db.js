@@ -15,6 +15,10 @@ const SCHEMA = `
     phone         TEXT,
     -- Dealers start 'pending' until an admin approves them; buyers are 'active' right away.
     status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'rejected')),
+    -- Set by an admin to block sign-in and hide the account's requests or responses.
+    frozen_at     TEXT,
+    frozen_reason TEXT,
+    last_login_at TEXT,
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -59,11 +63,22 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_responses_request ON responses(request_id);
 `;
 
+// What buyers and dealers are allowed to see: nothing from frozen accounts.
+// Admin screens read the underlying tables directly so they still see everything.
+const VIEWS = `
+  CREATE VIEW IF NOT EXISTS visible_requests AS
+    SELECT r.* FROM requests r JOIN accounts a ON a.id = r.user_id WHERE a.frozen_at IS NULL;
+
+  CREATE VIEW IF NOT EXISTS visible_responses AS
+    SELECT x.* FROM responses x JOIN accounts a ON a.id = x.dealer_id WHERE a.frozen_at IS NULL;
+`;
+
 export function openDatabase(file) {
   if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(SCHEMA);
   migrate(db);
+  db.exec(VIEWS);
   return db;
 }
 
@@ -74,5 +89,8 @@ function migrate(db) {
     // Dealers who signed up before approval existed stay active.
     db.exec(`ALTER TABLE accounts ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
       CHECK (status IN ('active', 'pending', 'rejected'))`);
+  }
+  for (const column of ['frozen_at', 'frozen_reason', 'last_login_at']) {
+    if (!columns.includes(column)) db.exec(`ALTER TABLE accounts ADD COLUMN ${column} TEXT`);
   }
 }

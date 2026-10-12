@@ -344,8 +344,10 @@ async function browse(params) {
 }
 
 async function requestDetail(id) {
-  const { request: r, responses } = await api(`/api/requests/${id}`);
-  const isOwner = me.role === 'user';
+  const { viewer, request: r, responses } = await api(`/api/requests/${id}`);
+  const isOwner = viewer === 'owner';
+  const isAdminView = viewer === 'admin';
+  const seesContacts = isOwner || isAdminView;
 
   const responseHtml = responses.length
     ? responses
@@ -353,13 +355,15 @@ async function requestDetail(id) {
           (x) => `
         <div class="card response">
           <div class="row spread">
-            <strong>${esc(x.dealer.businessName || x.dealer.name)}</strong>
+            <strong>${esc(x.dealer.businessName || x.dealer.name)}${
+              isAdminView ? ` <a class="muted" href="#/admin/account/${x.dealer.id}">view dealer</a>` : ''
+            }${x.dealerFrozen ? ' <span class="pill closed">frozen — hidden from buyer</span>' : ''}</strong>
             <span class="muted">${ago(x.createdAt)}</span>
           </div>
           ${x.price != null ? `<div>Asking: <strong>${money(x.price)}</strong></div>` : ''}
           <p style="white-space:pre-wrap">${esc(x.message)}</p>
           ${
-            isOwner
+            seesContacts
               ? `<div class="muted">Contact: ${esc(x.dealer.name)} · <a href="mailto:${esc(x.dealer.email)}">${esc(x.dealer.email)}</a>${
                   x.dealer.phone ? ` · <a href="tel:${esc(x.dealer.phone)}">${esc(x.dealer.phone)}</a>` : ''
                 }</div>`
@@ -368,16 +372,41 @@ async function requestDetail(id) {
         </div>`,
         )
         .join('')
-    : `<div class="card empty">${isOwner ? 'No dealer responses yet. Check back soon.' : "You haven't responded to this request yet."}</div>`;
+    : `<div class="card empty">${
+        isOwner ? 'No dealer responses yet. Check back soon.' : isAdminView ? 'No responses yet.' : "You haven't responded to this request yet."
+      }</div>`;
+
+  const statusButtons = (s) =>
+    [
+      s !== 'fulfilled' && `<button class="secondary" data-status="fulfilled">Mark as found</button>`,
+      s === 'open' && `<button class="secondary" data-status="closed">Close request</button>`,
+      s !== 'open' && `<button class="secondary" data-status="open">Reopen</button>`,
+    ]
+      .filter(Boolean)
+      .join('');
+
+  const back = isAdminView
+    ? `#/admin/account/${r.requester.id}`
+    : isOwner
+      ? '#/my'
+      : '#/browse';
 
   view.innerHTML = `
-    <p><a href="${isOwner ? '#/my' : '#/browse'}">← Back</a></p>
+    <p><a href="${back}">← Back</a></p>
     <div class="card">
       <div class="row spread">
         <h1 style="margin:0">${esc(vehicleTitle(r))}</h1>
         <span class="pill ${r.status}">${r.status}</span>
       </div>
-      <p class="muted">Posted ${ago(r.createdAt)}${!isOwner && r.requesterName ? ` by ${esc(r.requesterName)}` : ''}</p>
+      <p class="muted">Posted ${ago(r.createdAt)}${
+        isAdminView
+          ? ` by <a href="#/admin/account/${r.requester.id}">${esc(r.requester.name)}</a> (${esc(r.requester.email)})${
+              r.requester.frozen ? ' <span class="pill closed">account frozen — hidden from dealers</span>' : ''
+            }`
+          : !isOwner && r.requesterName
+            ? ` by ${esc(r.requesterName)}`
+            : ''
+      }</p>
       <dl class="facts">
         <dt>Years</dt><dd>${esc(years(r))}</dd>
         <dt>Budget</dt><dd>${r.maxBudget != null ? `up to ${money(r.maxBudget)}` : 'Not specified'}</dd>
@@ -386,20 +415,12 @@ async function requestDetail(id) {
         ${r.location ? `<dt>Location</dt><dd>${esc(r.location)}</dd>` : ''}
         ${r.notes ? `<dt>Notes</dt><dd style="white-space:pre-wrap">${esc(r.notes)}</dd>` : ''}
       </dl>
-      ${
-        isOwner
-          ? `<div class="row">
-              ${r.status !== 'fulfilled' ? `<button class="secondary" data-status="fulfilled">Mark as found</button>` : ''}
-              ${r.status === 'open' ? `<button class="secondary" data-status="closed">Close request</button>` : ''}
-              ${r.status !== 'open' ? `<button class="secondary" data-status="open">Reopen</button>` : ''}
-            </div>`
-          : ''
-      }
+      ${seesContacts ? `<div class="row">${isAdminView ? '<span class="muted">Admin:</span>' : ''}${statusButtons(r.status)}</div>` : ''}
     </div>
-    <h2 style="margin-top:24px">${isOwner ? `Dealer responses (${responses.length})` : 'Your responses'}</h2>
+    <h2 style="margin-top:24px">${seesContacts ? `Dealer responses (${responses.length})` : 'Your responses'}</h2>
     ${responseHtml}
     ${
-      !isOwner && r.status === 'open'
+      viewer === 'dealer' && r.status === 'open'
         ? `<div class="card">
             <h3>Respond to this buyer</h3>
             <p class="muted">Your business name, email${me.phone ? ', and phone' : ''} will be shared with the buyer.</p>
@@ -415,7 +436,8 @@ async function requestDetail(id) {
 
   view.querySelectorAll('[data-status]').forEach((b) =>
     b.addEventListener('click', async () => {
-      await api(`/api/requests/${r.id}`, { method: 'PATCH', body: { status: b.dataset.status } });
+      const path = isAdminView ? `/api/admin/requests/${r.id}` : `/api/requests/${r.id}`;
+      await api(path, { method: 'PATCH', body: { status: b.dataset.status } });
       render();
     }),
   );
@@ -447,61 +469,251 @@ function dealerNotApproved() {
   });
 }
 
-const DEALER_TABS = [
-  ['pending', 'Waiting for approval'],
-  ['active', 'Approved'],
-  ['rejected', 'Rejected'],
+// ---------- admin ----------
+
+const ADMIN_STATUS_FILTERS = {
+  dealer: [
+    ['all', 'All'],
+    ['pending', 'Waiting for approval'],
+    ['active', 'Approved'],
+    ['rejected', 'Rejected'],
+    ['frozen', 'Frozen'],
+  ],
+  user: [
+    ['all', 'All'],
+    ['active', 'Active'],
+    ['frozen', 'Frozen'],
+  ],
+};
+
+const ADMIN_SORTS = [
+  ['newest', 'Newest'],
+  ['oldest', 'Oldest'],
+  ['name', 'Name A–Z'],
+  ['last_login', 'Last login'],
+  ['activity', 'Most active'],
 ];
 
-async function admin(params) {
-  const status = DEALER_TABS.some(([s]) => s === params.get('status')) ? params.get('status') : 'pending';
-  const { counts, dealers } = await api(`/api/admin/dealers?status=${status}`);
+// One badge that sums up an account's state for the admin lists.
+function accountBadge(a) {
+  if (a.frozen) return '<span class="pill closed">frozen</span>';
+  if (a.role === 'dealer' && a.status === 'pending') return '<span class="pill pending">waiting</span>';
+  if (a.role === 'dealer' && a.status === 'rejected') return '<span class="pill fulfilled">rejected</span>';
+  return `<span class="pill open">${a.role === 'dealer' ? 'approved' : 'active'}</span>`;
+}
 
-  const actions = (d) =>
-    [
-      d.status !== 'active' && `<button data-id="${d.id}" data-status="active">Approve</button>`,
-      d.status !== 'rejected' && `<button class="secondary" data-id="${d.id}" data-status="rejected">${d.status === 'active' ? 'Revoke' : 'Reject'}</button>`,
-    ]
-      .filter(Boolean)
-      .join(' ');
+const when = (d) => (d ? ago(d) : '<span class="muted">never</span>');
+
+async function admin(params) {
+  const role = params.get('role') === 'user' ? 'user' : 'dealer';
+  const filters = ADMIN_STATUS_FILTERS[role];
+  const fallbackStatus = role === 'dealer' && !params.get('status') ? 'pending' : 'all';
+  const state = {
+    role,
+    status: filters.some(([s]) => s === params.get('status')) ? params.get('status') : fallbackStatus,
+    q: params.get('q') ?? '',
+    sort: ADMIN_SORTS.some(([s]) => s === params.get('sort')) ? params.get('sort') : 'newest',
+  };
+
+  const [{ stats }, { accounts }] = await Promise.all([
+    api('/api/admin/stats'),
+    api(`/api/admin/accounts?${new URLSearchParams(state)}`),
+  ]);
+  // With no dealers waiting, open on all dealers rather than an empty list.
+  if (role === 'dealer' && !params.get('status') && stats.dealersPending === 0 && state.status === 'pending') {
+    return go('#/admin?role=dealer&status=all');
+  }
+
+  const tile = (n, label, href) =>
+    `<a class="card stat" href="${href}"><span class="stat-n">${n}</span><span class="muted">${label}</span></a>`;
 
   view.innerHTML = `
-    <h1>Dealers</h1>
-    <div class="row" style="margin-bottom:16px">
-      ${DEALER_TABS.map(
-        ([s, label]) =>
-          `<a class="button ${s === status ? '' : 'secondary'}" href="#/admin?status=${s}">${label} (${counts[s]})</a>`,
-      ).join('')}
+    <h1>Admin</h1>
+    <div class="stats">
+      ${tile(stats.dealersPending, 'Dealers waiting', '#/admin?role=dealer&status=pending')}
+      ${tile(stats.dealersApproved, 'Approved dealers', '#/admin?role=dealer&status=active')}
+      ${tile(stats.users, 'Users', '#/admin?role=user')}
+      ${tile(stats.openRequests, 'Open requests', '#/admin?role=user&sort=activity')}
+      ${tile(stats.responsesLast7Days, 'Responses (7 days)', '#/admin?role=dealer&status=active&sort=activity')}
+      ${tile(stats.frozen, 'Frozen accounts', `#/admin?role=${role}&status=frozen`)}
     </div>
+    <p class="muted" style="margin-top:-4px">Last 7 days: ${stats.newAccountsLast7Days} new accounts · ${stats.requestsLast7Days} new requests</p>
+
+    <div class="row" style="margin:20px 0 12px">
+      <a class="button ${role === 'dealer' ? '' : 'secondary'}" href="#/admin?role=dealer">Dealers</a>
+      <a class="button ${role === 'user' ? '' : 'secondary'}" href="#/admin?role=user&status=all">Users</a>
+    </div>
+
+    <form class="filters admin-filters" id="filters">
+      <input class="search" name="q" type="search" placeholder="Search name, email, ${role === 'dealer' ? 'business, ' : ''}phone…" value="${esc(state.q)}">
+      <select name="status">${filters
+        .map(([v, l]) => `<option value="${v}" ${state.status === v ? 'selected' : ''}>${l}</option>`)
+        .join('')}</select>
+      <select name="sort">${ADMIN_SORTS.map(([v, l]) => `<option value="${v}" ${state.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <button type="submit" hidden>Search</button>
+    </form>
+
     ${
-      dealers.length
+      accounts.length
         ? `<div class="table-wrap"><table>
-            <thead><tr><th>Business</th><th>Contact</th><th>Signed up</th>${status === 'active' ? '<th>Responses</th>' : ''}<th></th></tr></thead>
-            <tbody>${dealers
+            <thead><tr>
+              <th>${role === 'dealer' ? 'Business' : 'Name'}</th><th>Contact</th><th>Status</th>
+              ${role === 'dealer' ? '<th>Responses</th>' : '<th>Requests</th><th>Open</th>'}
+              <th>Signed up</th><th>Last login</th><th></th>
+            </tr></thead>
+            <tbody>${accounts
               .map(
-                (d) => `
-              <tr class="static">
-                <td><strong>${esc(d.businessName || '—')}</strong></td>
-                <td>${esc(d.name)}<br><a href="mailto:${esc(d.email)}">${esc(d.email)}</a>${d.phone ? `<br><a href="tel:${esc(d.phone)}">${esc(d.phone)}</a>` : ''}</td>
-                <td>${ago(d.createdAt)}</td>
-                ${status === 'active' ? `<td>${d.responseCount}</td>` : ''}
-                <td><div class="row">${actions(d)}</div></td>
+                (a) => `
+              <tr data-id="${a.id}">
+                <td><strong>${esc(role === 'dealer' ? a.businessName || a.name : a.name)}</strong>${
+                  role === 'dealer' ? `<br><span class="muted">${esc(a.name)}</span>` : ''
+                }${a.isAdmin ? ' <span class="pill open">admin</span>' : ''}</td>
+                <td>${esc(a.email)}${a.phone ? `<br><span class="muted">${esc(a.phone)}</span>` : ''}</td>
+                <td>${accountBadge(a)}</td>
+                ${role === 'dealer' ? `<td>${a.responseCount}</td>` : `<td>${a.requestCount}</td><td>${a.openRequestCount}</td>`}
+                <td>${ago(a.createdAt)}</td>
+                <td>${when(a.lastLoginAt)}</td>
+                <td><div class="row">${
+                  role === 'dealer' && a.status === 'pending' && !a.frozen
+                    ? `<button data-approve="${a.id}">Approve</button>`
+                    : ''
+                }<a href="#/admin/account/${a.id}">Details</a></div></td>
               </tr>`,
               )
               .join('')}</tbody>
-          </table></div>`
-        : `<div class="card empty">${status === 'pending' ? 'No dealers waiting for approval.' : 'None yet.'}</div>`
+          </table></div>
+          <p class="muted">${accounts.length} ${accounts.length === 1 ? 'account' : 'accounts'}</p>`
+        : `<div class="card empty">No ${role === 'dealer' ? 'dealers' : 'users'} match.</div>`
     }`;
 
-  view.querySelectorAll('button[data-status]').forEach((b) =>
+  const form = view.querySelector('#filters');
+  const update = () => go(`#/admin?${new URLSearchParams({ role, ...formData(form) })}`);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    update();
+  });
+  form.addEventListener('change', (e) => e.target.name !== 'q' && update());
+  view.querySelectorAll('tbody tr').forEach((tr) =>
+    tr.addEventListener('click', (e) => {
+      if (!e.target.closest('button, a')) go(`#/admin/account/${tr.dataset.id}`);
+    }),
+  );
+  view.querySelectorAll('[data-approve]').forEach((b) =>
     b.addEventListener('click', async () => {
-      const verb = { active: 'Approve', rejected: b.textContent }[b.dataset.status];
-      if (b.dataset.status === 'rejected' && !confirm(`${verb} this dealer? They will lose access to buyer requests.`)) return;
       b.disabled = true;
-      await api(`/api/admin/dealers/${b.dataset.id}`, { method: 'PATCH', body: { status: b.dataset.status } });
+      await api(`/api/admin/accounts/${b.dataset.approve}`, { method: 'PATCH', body: { status: 'active' } });
       render();
     }),
   );
+}
+
+async function adminAccount(id) {
+  const { account: a, requests, responses } = await api(`/api/admin/accounts/${id}`);
+  const isDealer = a.role === 'dealer';
+  const listHref = `#/admin?role=${a.role}${isDealer ? '&status=all' : ''}`;
+
+  const actions = [
+    isDealer && a.status !== 'active' && `<button data-patch='{"status":"active"}'>Approve dealer</button>`,
+    isDealer && a.status === 'pending' && `<button class="secondary" data-patch='{"status":"rejected"}' data-confirm="Reject this dealer? They won't be able to see buyer requests.">Reject</button>`,
+    isDealer && a.status === 'active' && `<button class="secondary" data-patch='{"status":"rejected"}' data-confirm="Revoke this dealer's approval? They'll lose access to buyer requests.">Revoke approval</button>`,
+    !a.isAdmin && !a.frozen && `<button class="danger" id="freeze">Freeze account</button>`,
+    a.frozen && `<button data-patch='{"frozen":false}'>Unfreeze account</button>`,
+  ]
+    .filter(Boolean)
+    .join('');
+
+  const activity = isDealer
+    ? responses.length
+      ? `<div class="table-wrap"><table>
+          <thead><tr><th>Request</th><th>Price</th><th>Message</th><th>Sent</th></tr></thead>
+          <tbody>${responses
+            .map(
+              (x) => `<tr data-href="#/request/${x.requestId}">
+                <td><strong>${esc(vehicleTitle(x.request))}</strong><br><span class="pill ${x.request.status}">${x.request.status}</span></td>
+                <td>${money(x.price)}</td>
+                <td class="wrap muted">${esc(x.message.slice(0, 160))}</td>
+                <td>${ago(x.createdAt)}</td>
+              </tr>`,
+            )
+            .join('')}</tbody></table></div>`
+      : '<div class="card empty">No responses yet.</div>'
+    : requests.length
+      ? `<div class="table-wrap"><table>
+          <thead><tr><th>Vehicle</th><th>Years</th><th>Budget</th><th>Status</th><th>Responses</th><th>Posted</th></tr></thead>
+          <tbody>${requests
+            .map(
+              (r) => `<tr data-href="#/request/${r.id}">
+                <td><strong>${esc(r.make)} ${esc(r.model)}</strong>${r.trim ? `<br><span class="muted">${esc(r.trim)}</span>` : ''}</td>
+                <td>${esc(years(r))}</td>
+                <td>${money(r.maxBudget)}</td>
+                <td><span class="pill ${r.status}">${r.status}</span></td>
+                <td>${r.responseCount}</td>
+                <td>${ago(r.createdAt)}</td>
+              </tr>`,
+            )
+            .join('')}</tbody></table></div>`
+      : '<div class="card empty">No requests yet.</div>';
+
+  view.innerHTML = `
+    <p><a href="${listHref}">← All ${isDealer ? 'dealers' : 'users'}</a></p>
+    <div class="card">
+      <div class="row spread">
+        <h1 style="margin:0">${esc(isDealer ? a.businessName || a.name : a.name)}</h1>
+        <span>${accountBadge(a)}${a.isAdmin ? ' <span class="pill open">admin</span>' : ''}</span>
+      </div>
+      ${
+        a.frozen
+          ? `<p class="frozen-note">Frozen ${ago(a.frozenAt)}${a.frozenReason ? `: “${esc(a.frozenReason)}”` : ''}. This account can't sign in, and its ${
+              isDealer ? 'responses are hidden from buyers' : 'requests are hidden from dealers'
+            }.</p>`
+          : ''
+      }
+      <dl class="facts">
+        <dt>Type</dt><dd>${isDealer ? 'Dealer' : 'User (buyer)'}</dd>
+        ${isDealer ? `<dt>Contact name</dt><dd>${esc(a.name)}</dd>` : ''}
+        <dt>Email</dt><dd><a href="mailto:${esc(a.email)}">${esc(a.email)}</a></dd>
+        <dt>Phone</dt><dd>${a.phone ? `<a href="tel:${esc(a.phone)}">${esc(a.phone)}</a>` : '<span class="muted">—</span>'}</dd>
+        <dt>Signed up</dt><dd>${new Date(`${a.createdAt.replace(' ', 'T')}Z`).toLocaleString()} (${ago(a.createdAt)})</dd>
+        <dt>Last login</dt><dd>${when(a.lastLoginAt)}</dd>
+        ${
+          isDealer
+            ? `<dt>Responses sent</dt><dd>${a.responseCount}</dd>`
+            : `<dt>Requests</dt><dd>${a.requestCount} total · ${a.openRequestCount} open</dd>`
+        }
+      </dl>
+      ${actions ? `<div class="row">${actions}</div>` : ''}
+      ${a.isAdmin ? '<p class="muted">Admin accounts can\'t be frozen. Admins are set with ADMIN_EMAILS in Render.</p>' : ''}
+      <p class="error" id="admin-error"></p>
+    </div>
+    <h2 style="margin-top:24px">${isDealer ? 'Responses' : 'Requests'}</h2>
+    ${activity}`;
+
+  const fail = (err) => (view.querySelector('#admin-error').textContent = err.message);
+  const patch = async (body) => {
+    try {
+      await api(`/api/admin/accounts/${a.id}`, { method: 'PATCH', body });
+      render();
+    } catch (err) {
+      fail(err);
+    }
+  };
+  view.querySelectorAll('[data-patch]').forEach((b) =>
+    b.addEventListener('click', () => {
+      if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
+      b.disabled = true;
+      patch(JSON.parse(b.dataset.patch));
+    }),
+  );
+  view.querySelector('#freeze')?.addEventListener('click', () => {
+    const reason = prompt(
+      `Freeze ${a.businessName || a.name}?\n\nThey'll be signed out immediately and can't sign back in. ${
+        isDealer ? 'Their responses will be hidden from buyers.' : 'Their requests will be hidden from dealers.'
+      }\n\nOptional reason (only admins see it):`,
+    );
+    if (reason === null) return; // cancelled
+    patch({ frozen: true, reason });
+  });
+  view.querySelectorAll('tr[data-href]').forEach((tr) => tr.addEventListener('click', () => go(tr.dataset.href)));
 }
 
 // ---------- router ----------
@@ -523,6 +735,8 @@ async function render() {
 
   try {
     if (me.isAdmin && path === '/admin') return await admin(params);
+    const adminDetail = path.match(/^\/admin\/account\/(\d+)$/);
+    if (me.isAdmin && adminDetail) return await adminAccount(adminDetail[1]);
     if (dealerBlocked()) return dealerNotApproved();
     const detail = path.match(/^\/request\/(\d+)$/);
     if (detail) return await requestDetail(detail[1]);

@@ -110,3 +110,15 @@ dl.facts dd { margin: 0; }
 .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
 tbody tr.static { cursor: default; }
 .split .card + .card { margin-top: 0; }
+
+/* admin */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.card.stat { display: grid; gap: 2px; padding: 14px 16px; text-decoration: none; color: inherit; margin: 0; }
+.card.stat:hover { border-color: var(--accent); }
+.stat-n { font-size: 1.8rem; font-weight: 700; line-height: 1.1; }
+.filters.admin-filters { grid-template-columns: 3fr 1fr 1fr; }
+@media (max-width: 900px) { .filters.admin-filters { grid-template-columns: 1fr 1fr; } }
+.pill.pending { color: var(--warn); }
+button.danger { background: transparent; color: var(--accent); border-color: var(--accent); }
+button.danger:hover { background: var(--accent); color: var(--accent-text); }
+.frozen-note { border-left: 3px solid var(--warn); padding: 6px 12px; background: var(--bg); }
