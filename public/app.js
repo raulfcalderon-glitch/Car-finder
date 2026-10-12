@@ -176,37 +176,54 @@ function signup(params) {
   });
 }
 
-function requestForm() {
+// The vehicle request form, used by buyers to post and by admins to edit.
+function requestForm({ initial = {}, edit = null } = {}) {
   const thisYear = new Date().getFullYear();
+  const v = (k) => `value="${esc(initial[k] ?? '')}"`;
   view.innerHTML = `
     <div class="card" style="max-width:720px;margin:0 auto">
-      <h1>What are you hunting for?</h1>
-      <p class="muted">The more specific, the better — options, gearbox, paint, mileage, provenance. Dealers see everything here except your contact details.</p>
+      ${
+        edit
+          ? `<h1>Edit request</h1><p class="muted">Editing as admin. Changes are visible to the buyer and dealers right away.</p>`
+          : `<h1>What are you hunting for?</h1>
+             <p class="muted">The more specific, the better — options, gearbox, paint, mileage, provenance. Dealers see everything here except your contact details.</p>`
+      }
       <form>
         <div class="grid-2">
-          <label>Make <input name="make" placeholder="Porsche" required></label>
-          <label>Model <input name="model" placeholder="911 Carrera" required></label>
-          <label>Year from <input name="yearMin" type="number" min="1885" max="${thisYear + 2}" placeholder="1987"></label>
-          <label>Year to <input name="yearMax" type="number" min="1885" max="${thisYear + 2}" placeholder="1987"></label>
-          <label>Trim / variant <input name="trim" placeholder="Targa, G50 gearbox, Sport Seats"></label>
-          <label>Color <input name="color" placeholder="Guards Red"></label>
-          <label>Max budget (USD) <input name="maxBudget" type="number" min="0" step="500" placeholder="85000"></label>
+          <label>Make <input name="make" placeholder="Porsche" required ${v('make')}></label>
+          <label>Model <input name="model" placeholder="911 Carrera" required ${v('model')}></label>
+          <label>Year from <input name="yearMin" type="number" min="1885" max="${thisYear + 2}" placeholder="1987" ${v('yearMin')}></label>
+          <label>Year to <input name="yearMax" type="number" min="1885" max="${thisYear + 2}" placeholder="1987" ${v('yearMax')}></label>
+          <label>Trim / variant <input name="trim" placeholder="Targa, G50 gearbox, Sport Seats" ${v('trim')}></label>
+          <label>Color <input name="color" placeholder="Guards Red" ${v('color')}></label>
+          <label>Max budget (USD) <input name="maxBudget" type="number" min="0" step="500" placeholder="85000" ${v('maxBudget')}></label>
           <label>Condition
             <select name="condition">
-              ${Object.entries(CONDITION_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+              ${Object.entries(CONDITION_LABELS)
+                .map(([c, l]) => `<option value="${c}" ${initial.condition === c ? 'selected' : ''}>${l}</option>`)
+                .join('')}
             </select>
           </label>
         </div>
-        <label>Your location <span class="hint">city / state — helps dealers estimate shipping</span><input name="location" placeholder="Austin, TX"></label>
-        <label>Notes <textarea name="notes" placeholder="Matching numbers, under 80k miles, service records preferred…"></textarea></label>
+        <label>${edit ? 'Location' : 'Your location'} <span class="hint">city / state — helps dealers estimate shipping</span><input name="location" placeholder="Austin, TX" ${v('location')}></label>
+        <label>Notes <textarea name="notes" placeholder="Matching numbers, under 80k miles, service records preferred…">${esc(initial.notes ?? '')}</textarea></label>
         <p class="error"></p>
-        <div class="row"><button type="submit">Post request</button><a href="#/my">Cancel</a></div>
+        <div class="row"><button type="submit">${edit ? 'Save changes' : 'Post request'}</button><a href="${edit ? edit.cancelHref : '#/my'}">Cancel</a></div>
       </form>
     </div>`;
   bindForm(view.querySelector('form'), async (data) => {
+    if (edit) {
+      await api(`/api/admin/requests/${edit.id}`, { method: 'PATCH', body: data });
+      return go(edit.cancelHref);
+    }
     const { request } = await api('/api/requests', { method: 'POST', body: data });
     go(`#/request/${request.id}`);
   });
+}
+
+async function adminEditRequest(id) {
+  const { request } = await api(`/api/requests/${id}`);
+  requestForm({ initial: request, edit: { id, cancelHref: `#/request/${id}` } });
 }
 
 async function myRequests() {
@@ -224,7 +241,7 @@ async function myRequests() {
             <a class="card request-card" href="#/request/${r.id}">
               <div class="row spread">
                 <span class="vehicle">${esc(vehicleTitle(r))}</span>
-                <span class="pill ${r.status}">${r.status}</span>
+                <span>${r.hidden ? '<span class="pill closed">hidden</span> ' : ''}<span class="pill ${r.status}">${r.status}</span></span>
               </div>
               <div class="muted">${esc(years(r))} · ${money(r.maxBudget)} · ${esc(CONDITION_LABELS[r.condition])} · posted ${ago(r.createdAt)}</div>
               <div><strong>${r.responseCount}</strong> dealer ${r.responseCount === 1 ? 'response' : 'responses'}</div>
@@ -386,7 +403,7 @@ async function requestDetail(id) {
       .join('');
 
   const back = isAdminView
-    ? `#/admin/account/${r.requester.id}`
+    ? '#/admin/requests'
     : isOwner
       ? '#/my'
       : '#/browse';
@@ -415,7 +432,23 @@ async function requestDetail(id) {
         ${r.location ? `<dt>Location</dt><dd>${esc(r.location)}</dd>` : ''}
         ${r.notes ? `<dt>Notes</dt><dd style="white-space:pre-wrap">${esc(r.notes)}</dd>` : ''}
       </dl>
-      ${seesContacts ? `<div class="row">${isAdminView ? '<span class="muted">Admin:</span>' : ''}${statusButtons(r.status)}</div>` : ''}
+      ${
+        isAdminView && r.hidden
+          ? `<p class="frozen-note">Hidden from dealers ${ago(r.hiddenAt)}${r.hiddenReason ? `: “${esc(r.hiddenReason)}”` : ''}. The buyer still sees it in their list, marked hidden.</p>`
+          : ''
+      }
+      ${isOwner && r.hidden ? '<p class="frozen-note">This request has been hidden from dealers by CarsFindMe. Contact us if you have questions.</p>' : ''}
+      ${seesContacts ? `<div class="row">${isAdminView ? '<span class="muted">Status:</span>' : ''}${statusButtons(r.status)}</div>` : ''}
+      ${
+        isAdminView
+          ? `<div class="row" style="margin-top:10px"><span class="muted">Admin:</span>
+              <a class="button secondary" href="#/admin/request/${r.id}/edit">Edit</a>
+              ${r.hidden ? '<button class="secondary" id="unhide">Unhide</button>' : '<button class="secondary" id="hide">Hide from dealers</button>'}
+              <button class="danger" id="delete">Delete</button>
+            </div>
+            <p class="error" id="admin-error"></p>`
+          : ''
+      }
     </div>
     <h2 style="margin-top:24px">${seesContacts ? `Dealer responses (${responses.length})` : 'Your responses'}</h2>
     ${responseHtml}
@@ -433,6 +466,30 @@ async function requestDetail(id) {
           </div>`
         : ''
     }`;
+
+  if (isAdminView) {
+    const adminPatch = async (body) => {
+      try {
+        await api(`/api/admin/requests/${r.id}`, { method: 'PATCH', body });
+        render();
+      } catch (err) {
+        view.querySelector('#admin-error').textContent = err.message;
+      }
+    };
+    view.querySelector('#hide')?.addEventListener('click', () => {
+      const reason = prompt(
+        'Hide this request from dealers?\n\nThe buyer still sees it, marked hidden. You can unhide it any time.\n\nOptional reason (only admins see it):',
+      );
+      if (reason !== null) adminPatch({ hidden: true, reason });
+    });
+    view.querySelector('#unhide')?.addEventListener('click', () => adminPatch({ hidden: false }));
+    view.querySelector('#delete').addEventListener('click', async () => {
+      const n = responses.length;
+      if (!confirm(`Permanently delete "${vehicleTitle(r)}"${n ? ` and its ${n} dealer ${n === 1 ? 'response' : 'responses'}` : ''}?\n\nThis can't be undone. Consider hiding it instead.`)) return;
+      await api(`/api/admin/requests/${r.id}`, { method: 'DELETE' });
+      go('#/admin/requests');
+    });
+  }
 
   view.querySelectorAll('[data-status]').forEach((b) =>
     b.addEventListener('click', async () => {
@@ -504,6 +561,129 @@ function accountBadge(a) {
 
 const when = (d) => (d ? ago(d) : '<span class="muted">never</span>');
 
+// Stat tiles and the Dealers / Users / Requests tabs shared by the admin list pages.
+function adminHeader(stats, tab) {
+  const tile = (n, label, href) =>
+    `<a class="card stat" href="${href}"><span class="stat-n">${n}</span><span class="muted">${label}</span></a>`;
+  return `
+    <h1>Admin</h1>
+    <div class="stats">
+      ${tile(stats.dealersPending, 'Dealers waiting', '#/admin?role=dealer&status=pending')}
+      ${tile(stats.dealersApproved, 'Approved dealers', '#/admin?role=dealer&status=active')}
+      ${tile(stats.users, 'Users', '#/admin?role=user&status=all')}
+      ${tile(stats.openRequests, 'Open requests', '#/admin/requests')}
+      ${tile(stats.responsesLast7Days, 'Responses (7 days)', '#/admin?role=dealer&status=active&sort=activity')}
+      ${tile(stats.frozen, 'Frozen accounts', '#/admin?role=user&status=frozen')}
+    </div>
+    <p class="muted" style="margin-top:-4px">Last 7 days: ${stats.newAccountsLast7Days} new accounts · ${stats.requestsLast7Days} new requests${
+      stats.hiddenRequests ? ` · ${stats.hiddenRequests} open ${stats.hiddenRequests === 1 ? 'request' : 'requests'} hidden` : ''
+    }</p>
+    <div class="row" style="margin:20px 0 12px">
+      <a class="button ${tab === 'dealer' ? '' : 'secondary'}" href="#/admin?role=dealer">Dealers</a>
+      <a class="button ${tab === 'user' ? '' : 'secondary'}" href="#/admin?role=user&status=all">Users</a>
+      <a class="button ${tab === 'requests' ? '' : 'secondary'}" href="#/admin/requests">Requests</a>
+    </div>`;
+}
+
+const ADMIN_REQUEST_STATUSES = [
+  ['open', 'Open'],
+  ['fulfilled', 'Found'],
+  ['closed', 'Closed'],
+  ['all', 'Any status'],
+];
+const ADMIN_REQUEST_VISIBILITY = [
+  ['all', 'Visible & hidden'],
+  ['visible', 'Visible to dealers'],
+  ['hidden', 'Hidden from dealers'],
+];
+const ADMIN_REQUEST_SORTS = [
+  ['newest', 'Newest'],
+  ['oldest', 'Oldest'],
+  ['budget_desc', 'Budget: high to low'],
+  ['budget_asc', 'Budget: low to high'],
+  ['make', 'Make A–Z'],
+  ['responses', 'Most responses'],
+];
+const pick = (options, value, fallback) => (options.some(([v]) => v === value) ? value : fallback);
+
+async function adminRequests(params) {
+  const state = {
+    q: params.get('q') ?? '',
+    status: pick(ADMIN_REQUEST_STATUSES, params.get('status'), 'open'),
+    visibility: pick(ADMIN_REQUEST_VISIBILITY, params.get('visibility'), 'all'),
+    sort: pick(ADMIN_REQUEST_SORTS, params.get('sort'), 'newest'),
+  };
+  const [{ stats }, { requests }] = await Promise.all([
+    api('/api/admin/stats'),
+    api(`/api/admin/requests?${new URLSearchParams(state)}`),
+  ]);
+  const options = (list, current) =>
+    list.map(([v, l]) => `<option value="${v}" ${current === v ? 'selected' : ''}>${l}</option>`).join('');
+
+  view.innerHTML = `
+    ${adminHeader(stats, 'requests')}
+    <form class="filters admin-filters admin-request-filters" id="filters">
+      <input class="search" name="q" type="search" placeholder="Search vehicle, notes, location, buyer name or email, #id…" value="${esc(state.q)}">
+      <select name="status">${options(ADMIN_REQUEST_STATUSES, state.status)}</select>
+      <select name="visibility">${options(ADMIN_REQUEST_VISIBILITY, state.visibility)}</select>
+      <select name="sort">${options(ADMIN_REQUEST_SORTS, state.sort)}</select>
+      <button type="submit" hidden>Search</button>
+    </form>
+    ${
+      requests.length
+        ? `<div class="table-wrap"><table>
+            <thead><tr><th>#</th><th>Vehicle</th><th>Years</th><th>Budget</th><th>Buyer</th><th>Status</th><th>Responses</th><th>Posted</th><th></th></tr></thead>
+            <tbody>${requests
+              .map(
+                (r) => `
+              <tr data-id="${r.id}">
+                <td class="muted">${r.id}</td>
+                <td><strong>${esc(r.make)} ${esc(r.model)}</strong>${r.trim ? `<br><span class="muted">${esc(r.trim)}</span>` : ''}</td>
+                <td>${esc(years(r))}</td>
+                <td>${money(r.maxBudget)}</td>
+                <td><a href="#/admin/account/${r.requester.id}">${esc(r.requester.name)}</a><br><span class="muted">${esc(r.requester.email)}</span></td>
+                <td><span class="pill ${r.status}">${r.status === 'fulfilled' ? 'found' : r.status}</span>${
+                  r.hidden ? ' <span class="pill closed">hidden</span>' : ''
+                }${r.requester.frozen ? ' <span class="pill closed">buyer frozen</span>' : ''}</td>
+                <td>${r.responseCount}</td>
+                <td>${ago(r.createdAt)}</td>
+                <td><div class="row">
+                  <a href="#/admin/request/${r.id}/edit">Edit</a>
+                  ${r.hidden ? `<button class="secondary small" data-unhide="${r.id}">Unhide</button>` : `<button class="secondary small" data-hide="${r.id}">Hide</button>`}
+                </div></td>
+              </tr>`,
+              )
+              .join('')}</tbody>
+          </table></div>
+          <p class="muted">${requests.length} ${requests.length === 1 ? 'request' : 'requests'}. Open one to change its status or delete it.</p>`
+        : '<div class="card empty">No requests match.</div>'
+    }`;
+
+  const form = view.querySelector('#filters');
+  const update = () => go(`#/admin/requests?${new URLSearchParams(formData(form))}`);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    update();
+  });
+  form.addEventListener('change', (e) => e.target.name !== 'q' && update());
+  view.querySelectorAll('tbody tr').forEach((tr) =>
+    tr.addEventListener('click', (e) => {
+      if (!e.target.closest('button, a')) go(`#/request/${tr.dataset.id}`);
+    }),
+  );
+  const patch = async (id, body) => {
+    await api(`/api/admin/requests/${id}`, { method: 'PATCH', body });
+    render();
+  };
+  view.querySelectorAll('[data-hide]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const reason = prompt('Hide this request from dealers?\n\nOptional reason (only admins see it):');
+      if (reason !== null) patch(b.dataset.hide, { hidden: true, reason });
+    }),
+  );
+  view.querySelectorAll('[data-unhide]').forEach((b) => b.addEventListener('click', () => patch(b.dataset.unhide, { hidden: false })));
+}
+
 async function admin(params) {
   const role = params.get('role') === 'user' ? 'user' : 'dealer';
   const filters = ADMIN_STATUS_FILTERS[role];
@@ -524,25 +704,8 @@ async function admin(params) {
     return go('#/admin?role=dealer&status=all');
   }
 
-  const tile = (n, label, href) =>
-    `<a class="card stat" href="${href}"><span class="stat-n">${n}</span><span class="muted">${label}</span></a>`;
-
   view.innerHTML = `
-    <h1>Admin</h1>
-    <div class="stats">
-      ${tile(stats.dealersPending, 'Dealers waiting', '#/admin?role=dealer&status=pending')}
-      ${tile(stats.dealersApproved, 'Approved dealers', '#/admin?role=dealer&status=active')}
-      ${tile(stats.users, 'Users', '#/admin?role=user')}
-      ${tile(stats.openRequests, 'Open requests', '#/admin?role=user&sort=activity')}
-      ${tile(stats.responsesLast7Days, 'Responses (7 days)', '#/admin?role=dealer&status=active&sort=activity')}
-      ${tile(stats.frozen, 'Frozen accounts', `#/admin?role=${role}&status=frozen`)}
-    </div>
-    <p class="muted" style="margin-top:-4px">Last 7 days: ${stats.newAccountsLast7Days} new accounts · ${stats.requestsLast7Days} new requests</p>
-
-    <div class="row" style="margin:20px 0 12px">
-      <a class="button ${role === 'dealer' ? '' : 'secondary'}" href="#/admin?role=dealer">Dealers</a>
-      <a class="button ${role === 'user' ? '' : 'secondary'}" href="#/admin?role=user&status=all">Users</a>
-    </div>
+    ${adminHeader(stats, role)}
 
     <form class="filters admin-filters" id="filters">
       <input class="search" name="q" type="search" placeholder="Search name, email, ${role === 'dealer' ? 'business, ' : ''}phone…" value="${esc(state.q)}">
@@ -737,6 +900,9 @@ async function render() {
     if (me.isAdmin && path === '/admin') return await admin(params);
     const adminDetail = path.match(/^\/admin\/account\/(\d+)$/);
     if (me.isAdmin && adminDetail) return await adminAccount(adminDetail[1]);
+    if (me.isAdmin && path === '/admin/requests') return await adminRequests(params);
+    const adminEdit = path.match(/^\/admin\/request\/(\d+)\/edit$/);
+    if (me.isAdmin && adminEdit) return await adminEditRequest(adminEdit[1]);
     if (dealerBlocked()) return dealerNotApproved();
     const detail = path.match(/^\/request\/(\d+)$/);
     if (detail) return await requestDetail(detail[1]);

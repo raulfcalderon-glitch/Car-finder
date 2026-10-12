@@ -124,6 +124,7 @@ function serializeRequest(r) {
     location: r.location,
     notes: r.notes,
     status: r.status,
+    hidden: Boolean(r.hidden_at),
     createdAt: r.created_at,
     // Dealers see only the buyer's first name; contact happens through responses.
     requesterName: r.requester_name ? String(r.requester_name).split(/\s+/)[0] : undefined,
@@ -285,6 +286,9 @@ export function createApp(
         max_budget = :max_budget, condition = :condition, color = :color, location = :location, notes = :notes
       WHERE id = :id`),
     updateStatus: db.prepare('UPDATE requests SET status = ? WHERE id = ?'),
+    hideRequest: db.prepare("UPDATE requests SET hidden_at = datetime('now'), hidden_reason = ? WHERE id = ?"),
+    unhideRequest: db.prepare('UPDATE requests SET hidden_at = NULL, hidden_reason = NULL WHERE id = ?'),
+    deleteRequest: db.prepare('DELETE FROM requests WHERE id = ?'),
     requestById: db.prepare(`
       SELECT r.*, a.name AS requester_name, a.email AS requester_email, a.frozen_at AS requester_frozen_at,
         (SELECT COUNT(*) FROM visible_responses x WHERE x.request_id = r.id) AS response_count
@@ -341,11 +345,67 @@ export function createApp(
     sendJson(res, status, payload, { 'Set-Cookie': sessionCookie(token, { secure: secureCookies }) });
   }
 
-  // Requests from frozen accounts don't exist as far as dealers are concerned; admins still see them.
-  function loadRequest(id, { includeFrozen = false } = {}) {
+  function loadRequest(id) {
     const row = q.requestById.get(id);
-    if (!row || (row.requester_frozen_at && !includeFrozen)) throw new HttpError(404, 'Request not found');
+    if (!row) throw new HttpError(404, 'Request not found');
     return row;
+  }
+
+  // Hidden requests and those from frozen accounts don't exist as far as dealers are concerned.
+  function assertVisibleToDealers(request) {
+    if (request.hidden_at || request.requester_frozen_at) throw new HttpError(404, 'Request not found');
+  }
+
+  // Everything an admin sees about a request, including who posted it and moderation state.
+  function adminRequestPayload(row) {
+    return {
+      ...serializeRequest(row),
+      hiddenAt: row.hidden_at,
+      hiddenReason: row.hidden_reason,
+      requester: {
+        id: row.user_id,
+        name: row.requester_name,
+        email: row.requester_email,
+        frozen: Boolean(row.requester_frozen_at),
+      },
+    };
+  }
+
+  // Admin list of every request, with search, filters and sorting.
+  function searchAdminRequests(params) {
+    const where = [];
+    const args = {};
+    const status = oneOf(params.get('status') || undefined, 'status', [...STATUSES, 'all'], 'open');
+    if (status !== 'all') {
+      where.push('r.status = :status');
+      args.status = status;
+    }
+    const visibility = oneOf(params.get('visibility') || undefined, 'visibility', ['all', 'visible', 'hidden'], 'all');
+    if (visibility === 'hidden') where.push('(r.hidden_at IS NOT NULL OR a.frozen_at IS NOT NULL)');
+    if (visibility === 'visible') where.push('r.hidden_at IS NULL AND a.frozen_at IS NULL');
+
+    const text = str(params.get('q'), 'q', { max: 100 });
+    if (text) {
+      text.split(/\s+/).slice(0, 8).forEach((word, i) => {
+        where.push(`(r.make LIKE :w${i} ESCAPE '\\' OR r.model LIKE :w${i} ESCAPE '\\' OR r.trim LIKE :w${i} ESCAPE '\\'
+          OR r.notes LIKE :w${i} ESCAPE '\\' OR r.location LIKE :w${i} ESCAPE '\\' OR a.name LIKE :w${i} ESCAPE '\\'
+          OR a.email LIKE :w${i} ESCAPE '\\' OR CAST(r.id AS TEXT) = :n${i})`);
+        args[`w${i}`] = `%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+        args[`n${i}`] = word.replace(/^#/, '');
+      });
+    }
+    const sortKey = oneOf(params.get('sort') || undefined, 'sort', Object.keys(SORTS), 'newest');
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const rows = db
+      .prepare(`
+        SELECT r.*, a.name AS requester_name, a.email AS requester_email, a.frozen_at AS requester_frozen_at,
+          (SELECT COUNT(*) FROM responses x WHERE x.request_id = r.id) AS response_count
+        FROM requests r JOIN accounts a ON a.id = r.user_id
+        ${whereSql}
+        ORDER BY ${SORTS[sortKey]}
+        LIMIT 500`)
+      .all(args);
+    return { status, visibility, sort: sortKey, requests: rows.map(adminRequestPayload) };
   }
 
   function adminAccountPayload(id) {
@@ -387,6 +447,7 @@ export function createApp(
       dealersPending: one("SELECT COUNT(*) AS n FROM accounts WHERE role = 'dealer' AND status = 'pending' AND frozen_at IS NULL"),
       frozen: one('SELECT COUNT(*) AS n FROM accounts WHERE frozen_at IS NOT NULL'),
       openRequests: one("SELECT COUNT(*) AS n FROM visible_requests WHERE status = 'open'"),
+      hiddenRequests: one("SELECT COUNT(*) AS n FROM requests WHERE hidden_at IS NOT NULL AND status = 'open'"),
       requestsLast7Days: one("SELECT COUNT(*) AS n FROM requests WHERE created_at >= datetime('now', '-7 days')"),
       responsesLast7Days: one("SELECT COUNT(*) AS n FROM responses WHERE created_at >= datetime('now', '-7 days')"),
       newAccountsLast7Days: one("SELECT COUNT(*) AS n FROM accounts WHERE created_at >= datetime('now', '-7 days')"),
@@ -551,6 +612,7 @@ export function createApp(
     ['POST', /^\/api\/requests\/(\d+)\/responses$/, async (req, res, [id]) => {
       const account = requireAccount(req, 'dealer');
       const request = loadRequest(Number(id));
+      assertVisibleToDealers(request);
       if (request.status !== 'open') throw new HttpError(409, 'This request is no longer open');
       const body = await readJson(req);
       const message = str(body.message, 'Message', { required: true, max: 2000 });
@@ -614,13 +676,33 @@ export function createApp(
       if (body.status === 'active' && target.status !== 'active') notify(dealerApprovedEmail({ dealer: target, appUrl }));
     }],
 
+    ['GET', /^\/api\/admin\/requests$/, async (req, res, _m, url) => {
+      requireAdmin(req);
+      sendJson(res, 200, searchAdminRequests(url.searchParams));
+    }],
+
+    // Edit any field, change status, and hide / unhide a request.
     ['PATCH', /^\/api\/admin\/requests\/(\d+)$/, async (req, res, [id]) => {
       requireAdmin(req);
-      const request = loadRequest(Number(id), { includeFrozen: true });
-      const status = oneOf((await readJson(req)).status, 'Status', STATUSES, null);
-      if (!status) throw new HttpError(400, 'Status is required');
-      q.updateStatus.run(status, request.id);
-      sendJson(res, 200, { request: serializeRequest(loadRequest(request.id, { includeFrozen: true })) });
+      const existing = loadRequest(Number(id));
+      const { status, hidden, reason, ...fields } = await readJson(req);
+
+      if (Object.keys(fields).length) {
+        q.updateRequest.run({ ...parseRequestFields({ ...toBodyShape(existing), ...fields }), id: existing.id });
+      }
+      if (status !== undefined) q.updateStatus.run(oneOf(status, 'Status', STATUSES, existing.status), existing.id);
+      if (hidden === true) q.hideRequest.run(str(reason, 'Reason', { max: 500 }), existing.id);
+      else if (hidden === false) q.unhideRequest.run(existing.id);
+
+      sendJson(res, 200, { request: adminRequestPayload(loadRequest(existing.id)) });
+    }],
+
+    // Permanent: also removes every dealer response to the request.
+    ['DELETE', /^\/api\/admin\/requests\/(\d+)$/, async (req, res, [id]) => {
+      requireAdmin(req);
+      const request = loadRequest(Number(id));
+      q.deleteRequest.run(request.id);
+      sendJson(res, 200, { ok: true, deletedId: request.id });
     }],
 
     // --- shared ---
@@ -628,7 +710,7 @@ export function createApp(
     ['GET', /^\/api\/requests\/(\d+)$/, async (req, res, [id]) => {
       const account = requireAccount(req);
       const admin = isAdmin(account);
-      const request = loadRequest(Number(id), { includeFrozen: admin });
+      const request = loadRequest(Number(id));
       let viewer;
       let responses;
       if (account.role === 'user' && request.user_id === account.id) {
@@ -643,15 +725,13 @@ export function createApp(
         }));
       } else if (account.role === 'dealer') {
         // Dealers see only their own replies, not competitors'.
+        assertVisibleToDealers(request);
         viewer = 'dealer';
         responses = q.responsesForRequestByDealer.all(request.id, account.id).map(serializeResponse);
       } else {
         throw new HttpError(404, 'Request not found');
       }
-      const payload = serializeRequest(request);
-      if (viewer === 'admin') {
-        payload.requester = { id: request.user_id, name: request.requester_name, email: request.requester_email, frozen: Boolean(request.requester_frozen_at) };
-      }
+      const payload = viewer === 'admin' ? adminRequestPayload(request) : serializeRequest(request);
       sendJson(res, 200, { viewer, request: payload, responses });
     }],
   ];

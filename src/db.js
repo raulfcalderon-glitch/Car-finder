@@ -44,6 +44,9 @@ const SCHEMA = `
     location   TEXT,
     notes      TEXT,
     status     TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'fulfilled', 'closed')),
+    -- Set by an admin to take a request off the dealer list without deleting it.
+    hidden_at     TEXT,
+    hidden_reason TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -63,13 +66,17 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_responses_request ON responses(request_id);
 `;
 
-// What buyers and dealers are allowed to see: nothing from frozen accounts.
+// What dealers are allowed to see: no hidden requests and nothing from frozen accounts.
 // Admin screens read the underlying tables directly so they still see everything.
+// Views are rebuilt on every start so changes to them reach existing databases.
 const VIEWS = `
-  CREATE VIEW IF NOT EXISTS visible_requests AS
-    SELECT r.* FROM requests r JOIN accounts a ON a.id = r.user_id WHERE a.frozen_at IS NULL;
+  DROP VIEW IF EXISTS visible_requests;
+  CREATE VIEW visible_requests AS
+    SELECT r.* FROM requests r JOIN accounts a ON a.id = r.user_id
+    WHERE a.frozen_at IS NULL AND r.hidden_at IS NULL;
 
-  CREATE VIEW IF NOT EXISTS visible_responses AS
+  DROP VIEW IF EXISTS visible_responses;
+  CREATE VIEW visible_responses AS
     SELECT x.* FROM responses x JOIN accounts a ON a.id = x.dealer_id WHERE a.frozen_at IS NULL;
 `;
 
@@ -92,5 +99,9 @@ function migrate(db) {
   }
   for (const column of ['frozen_at', 'frozen_reason', 'last_login_at']) {
     if (!columns.includes(column)) db.exec(`ALTER TABLE accounts ADD COLUMN ${column} TEXT`);
+  }
+  const requestColumns = db.prepare('PRAGMA table_info(requests)').all().map((c) => c.name);
+  for (const column of ['hidden_at', 'hidden_reason']) {
+    if (!requestColumns.includes(column)) db.exec(`ALTER TABLE requests ADD COLUMN ${column} TEXT`);
   }
 }

@@ -311,13 +311,20 @@ test('upgrading an existing database keeps existing dealers approved', async () 
     name TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('user', 'dealer')), business_name TEXT, phone TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
   old.exec("INSERT INTO accounts (email, password_hash, name, role) VALUES ('old@dealer.com', 'x:y', 'Old', 'dealer')");
+  old.exec(`CREATE TABLE requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    make TEXT NOT NULL, model TEXT NOT NULL, trim TEXT, year_min INTEGER, year_max INTEGER, max_budget INTEGER,
+    condition TEXT NOT NULL DEFAULT 'any', color TEXT, location TEXT, notes TEXT,
+    status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+  old.exec("INSERT INTO requests (user_id, make, model) VALUES (1, 'Porsche', '964 RS')");
   old.close();
 
   const db = openDatabase(file);
   const row = db.prepare("SELECT status, frozen_at, last_login_at FROM accounts WHERE email = 'old@dealer.com'").get();
   assert.equal(row.status, 'active');
   assert.equal(row.frozen_at, null);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM visible_requests').get().n, 0, 'views exist');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM visible_requests').get().n, 1, 'old requests stay visible');
+  assert.ok(db.prepare('PRAGMA table_info(requests)').all().some((c) => c.name === 'hidden_at'));
   db.close();
   openDatabase(file).close(); // running the migration twice is harmless
 });
@@ -422,4 +429,61 @@ test("freezing a dealer hides their responses from buyers; admins can't be froze
   assert.equal(self.status, 400);
   assert.match(self.body.error, /can't be frozen/);
   assert.ok((await adminCall('GET', '/api/admin/stats')).body.stats.frozen >= 1);
+});
+
+test('admins can list, edit, hide and delete any request', async () => {
+  const adminCall = await admin();
+  const buyer = await signup('user', { name: 'Morgan Moderated', email: 'moderated@test.com' });
+  const dealer = await signup('dealer');
+  const { body } = await buyer('POST', '/api/requests', { make: 'Honda', model: 'Accord', notes: 'any color' });
+  const id = body.request.id;
+  await dealer('POST', `/api/requests/${id}/responses`, { message: 'Got one' });
+
+  // Listing and search, including by buyer email and #id.
+  const list = await adminCall('GET', '/api/admin/requests?q=moderated@test.com');
+  assert.equal(list.status, 200);
+  assert.deepEqual(list.body.requests.map((r) => r.id), [id]);
+  assert.equal(list.body.requests[0].requester.name, 'Morgan Moderated');
+  assert.equal(list.body.requests[0].responseCount, 1);
+  assert.equal((await adminCall('GET', `/api/admin/requests?q=%23${id}&status=all`)).body.requests[0].id, id);
+  assert.equal((await buyer('GET', '/api/admin/requests')).status, 403);
+  assert.equal((await adminCall('GET', '/api/admin/requests?visibility=bogus')).status, 400);
+
+  // Editing merges fields; clearing a field removes it; validation still applies.
+  const edited = await adminCall('PATCH', `/api/admin/requests/${id}`, { model: 'Accord Euro R', notes: '', yearMin: 2000, yearMax: 2002 });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.request.model, 'Accord Euro R');
+  assert.equal(edited.body.request.make, 'Honda');
+  assert.equal(edited.body.request.notes, null);
+  assert.equal((await adminCall('PATCH', `/api/admin/requests/${id}`, { yearMin: 2005, yearMax: 2001 })).status, 400);
+  assert.equal((await adminCall('PATCH', `/api/admin/requests/${id}`, { make: '' })).status, 400);
+  assert.equal((await buyer('PATCH', `/api/admin/requests/${id}`, { model: 'x' })).status, 403);
+
+  // Hiding takes it off the dealer side but the buyer still sees it, flagged.
+  const hidden = await adminCall('PATCH', `/api/admin/requests/${id}`, { hidden: true, reason: 'Not a specialty car' });
+  assert.equal(hidden.body.request.hidden, true);
+  assert.equal(hidden.body.request.hiddenReason, 'Not a specialty car');
+  assert.equal((await dealer('GET', '/api/requests?q=Euro')).body.total, 0);
+  assert.equal((await dealer('GET', `/api/requests/${id}`)).status, 404);
+  assert.equal((await dealer('POST', `/api/requests/${id}/responses`, { message: 'again' })).status, 404);
+  const ownView = await buyer('GET', `/api/requests/${id}`);
+  assert.equal(ownView.body.request.hidden, true);
+  assert.equal(ownView.body.request.hiddenReason, undefined, 'reason is for admins only');
+  assert.equal((await buyer('GET', '/api/my/requests')).body.requests.find((r) => r.id === id).hidden, true);
+  assert.deepEqual((await adminCall('GET', '/api/admin/requests?visibility=hidden&q=Euro')).body.requests.map((r) => r.id), [id]);
+  assert.equal((await adminCall('GET', '/api/admin/requests?visibility=visible&q=Euro')).body.requests.length, 0);
+  assert.ok((await adminCall('GET', '/api/admin/stats')).body.stats.hiddenRequests >= 1);
+
+  await adminCall('PATCH', `/api/admin/requests/${id}`, { hidden: false });
+  assert.equal((await dealer('GET', '/api/requests?q=Euro')).body.total, 1, 'unhidden');
+
+  // Deleting removes the request and its responses for good.
+  const deleted = await adminCall('DELETE', `/api/admin/requests/${id}`);
+  assert.equal(deleted.status, 200);
+  assert.equal((await buyer('GET', `/api/requests/${id}`)).status, 404);
+  assert.equal((await adminCall('GET', `/api/requests/${id}`)).status, 404);
+  assert.equal((await buyer('GET', '/api/my/requests')).body.requests.some((r) => r.id === id), false);
+  assert.equal((await adminCall('GET', `/api/admin/accounts/${dealer.account.id}`)).body.responses.length, 0, 'responses removed too');
+  assert.equal((await adminCall('DELETE', `/api/admin/requests/${id}`)).status, 404);
+  assert.equal((await buyer('DELETE', `/api/admin/requests/1`)).status, 403);
 });

@@ -122,3 +122,6 @@ tbody tr.static { cursor: default; }
 button.danger { background: transparent; color: var(--accent); border-color: var(--accent); }
 button.danger:hover { background: var(--accent); color: var(--accent-text); }
 .frozen-note { border-left: 3px solid var(--warn); padding: 6px 12px; background: var(--bg); }
+.filters.admin-request-filters { grid-template-columns: 3fr 1fr 1.3fr 1.2fr; }
+@media (max-width: 900px) { .filters.admin-request-filters { grid-template-columns: 1fr 1fr; } }
+button.small { padding: 4px 10px; font-size: .85rem; }

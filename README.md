@@ -4,7 +4,7 @@ A two-sided marketplace for enthusiast cars — 911s, BMW M cars, special editio
 
 - **Users** (buyers) post a request for the exact car they want — e.g. a 1987 Porsche 911 Carrera — with year range, budget, condition, color, location and notes.
 - **Dealers** (specialty dealerships, brokers, people in the car business) are approved by an admin, then browse every open request in a searchable, sortable list and respond with what they have and an asking price.
-- **Admins** see every user and dealer with activity and last login, approve dealers, close any request, and **freeze** accounts: a frozen account is signed out and can't sign in, a frozen user's requests are hidden from dealers, and a frozen dealer's responses are hidden from buyers.
+- **Admins** see every user and dealer with activity and last login, approve dealers, **edit, hide or delete any request**, and **freeze** accounts: a frozen account is signed out and can't sign in, a frozen user's requests are hidden from dealers, and a frozen dealer's responses are hidden from buyers.
 - Buyers get an **email alert** when a dealer responds, and see each response with the dealer's contact details. Dealers only see a buyer's first name and only their own responses, not competitors'.
 
 ## Run it
@@ -51,7 +51,9 @@ Environment variables:
 | GET | `/api/admin/accounts?role=dealer` | admin | Users or dealers with activity counts and last login; `status` (`all`, `active`, `pending`, `rejected`, `frozen`), `q`, `sort` (`newest`, `oldest`, `name`, `last_login`, `activity`) |
 | GET | `/api/admin/accounts/:id` | admin | One account with its requests (users) or responses (dealers) |
 | PATCH | `/api/admin/accounts/:id` | admin | `status` approves/rejects a dealer; `frozen: true` (with optional `reason`) or `false` freezes/unfreezes any non-admin account |
-| PATCH | `/api/admin/requests/:id` | admin | Set any request's `status` |
+| GET | `/api/admin/requests` | admin | Every request with buyer details; `q` (vehicle, notes, location, buyer name/email, `#id`), `status` (`open` default, `fulfilled`, `closed`, `all`), `visibility` (`all`, `visible`, `hidden`), `sort` |
+| PATCH | `/api/admin/requests/:id` | admin | Edit any request field, set `status`, or `hidden: true` (with optional `reason`) / `false` to hide it from dealers |
+| DELETE | `/api/admin/requests/:id` | admin | Permanently delete a request and its responses |
 | POST | `/api/requests/:id/responses` | approved dealer | Respond with `message` and optional `price` |
 
 `GET /api/requests` query parameters: `q` (free text; every word must match make/model/trim/color/location/notes, and a 4-digit year matches requests whose range covers it), `make`, `year` (requests whose range includes it), `condition`, `minBudget`, `status` (`open` by default, or `all`), `sort` (`newest`, `oldest`, `budget_desc`, `budget_asc`, `year_desc`, `year_asc`, `make`, `responses`), `limit`, `offset`.
