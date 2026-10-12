@@ -525,10 +525,76 @@ const CONTACT_TOPICS = {
   other: 'Something else',
 };
 
+// ---------- Continue with Google (buyers only) ----------
+
+let config;
+const loadConfig = async () => (config ??= await api('/api/config').catch(() => ({})));
+let gisScript;
+const loadGoogleScript = () =>
+  (gisScript ??= new Promise((resolve, reject) => {
+    const script = Object.assign(document.createElement('script'), { src: 'https://accounts.google.com/gsi/client', async: true });
+    script.onload = resolve;
+    script.onerror = () => {
+      gisScript = null;
+      reject(new Error("Couldn't load Google sign-in"));
+    };
+    document.head.append(script);
+  }));
+
+// Fills `box` with Google's button and an "or" divider. Stays empty if Google sign-in isn't set up.
+async function googleButton(box, { text = 'continue_with' } = {}) {
+  const { googleClientId } = await loadConfig();
+  if (!googleClientId || !box.isConnected) return;
+  try {
+    await loadGoogleScript();
+  } catch {
+    return; // e.g. blocked by a content blocker; email sign-up still works
+  }
+  box.innerHTML = '<div class="google-button"></div><p class="error"></p><div class="or-divider"><span>or use your email</span></div>';
+  google.accounts.id.initialize({
+    client_id: googleClientId,
+    callback: ({ credential }) => googleSignIn(credential, box.querySelector('.error')),
+  });
+  google.accounts.id.renderButton(box.querySelector('.google-button'), {
+    theme: 'outline', size: 'large', shape: 'pill', text, width: Math.min(box.clientWidth || 320, 400),
+  });
+}
+
+async function googleSignIn(credential, errorEl, acceptTerms = false) {
+  try {
+    const result = await api('/api/auth/google', { method: 'POST', body: { credential, acceptTerms } });
+    if (result.needsTerms) return googleTermsStep(credential, result);
+    me = result.account;
+    go(storage('peek') ? '#/new' : home());
+  } catch (err) {
+    errorEl.textContent = err.message;
+  }
+}
+
+// New Google users still agree to the Terms before their account is created.
+function googleTermsStep(credential, { name, email }) {
+  view.innerHTML = `
+    <div class="narrow card">
+      <h1>Almost there${name ? `, ${esc(name.split(/\s+/)[0])}` : ''}</h1>
+      <p class="muted">You're creating a buyer account with your Google address <strong>${esc(email)}</strong>.</p>
+      <form>
+        <label class="checkbox"><input type="checkbox" name="acceptTerms" required> <span>I'm 18 or older and agree to the <a href="#/terms" target="_blank">Terms of Service</a> and <a href="#/privacy" target="_blank">Privacy Policy</a>.</span></label>
+        <p class="error"></p>
+        <div class="row"><button type="submit">Create my account</button><a href="#/signup">Cancel</a></div>
+      </form>
+    </div>`;
+  const form = view.querySelector('form');
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    googleSignIn(credential, form.querySelector('.error'), true);
+  });
+}
+
 function login() {
   view.innerHTML = `
     <div class="narrow card">
       <h1>Log in</h1>
+      <div class="google-box"></div>
       <form>
         <label>Email <input name="email" type="email" autocomplete="email" required></label>
         <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
@@ -538,6 +604,10 @@ function login() {
         <p class="muted">No account? <a href="#/signup">Sign up</a></p>
       </form>
     </div>`;
+  googleButton(view.querySelector('.google-box'), { text: 'signin_with' }).then(() => {
+    const box = view.querySelector('.google-box .or-divider');
+    if (box) box.insertAdjacentHTML('beforebegin', '<p class="hint google-note">Google sign-in is for car buyers. Dealers, log in with your email and password.</p>');
+  });
   bindForm(view.querySelector('form'), async (data) => {
     me = (await api('/api/login', { method: 'POST', body: data })).account;
     go(me.role === 'user' && storage('peek') ? '#/new' : home());
@@ -573,6 +643,8 @@ function signup(params) {
           <label><input type="radio" name="role" value="user" ${role === 'user' ? 'checked' : ''}> I'm looking for a car</label>
           <label><input type="radio" name="role" value="dealer" ${role === 'dealer' ? 'checked' : ''}> I'm a dealer or broker</label>
         </fieldset>
+
+        <div class="google-box user-only"></div>
 
         <div class="verify-explainer dealer-only">
           <strong>How we verify dealers</strong>
@@ -622,11 +694,13 @@ function signup(params) {
     const isDealer = form.role.value === 'dealer';
     const kind = isDealer ? form.dealerType.value : 'user';
     form.querySelectorAll('.dealer-only').forEach((el) => (el.hidden = !isDealer));
+    form.querySelectorAll('.user-only').forEach((el) => (el.hidden = isDealer));
     form.querySelectorAll('.broker-only').forEach((el) => (el.hidden = kind !== 'broker'));
     form.querySelectorAll('[data-required]').forEach((el) => (el.required = el.dataset.required.split(' ').includes(kind)));
   };
   form.addEventListener('change', syncRole);
   syncRole();
+  googleButton(form.querySelector('.google-box'), { text: 'signup_with' });
   bindForm(form, async (data) => {
     const body = { ...data, acceptTerms: data.acceptTerms === 'on' };
     if (body.role !== 'dealer') for (const k of ['dealerType', 'jobTitle', 'website', 'businessAddress', 'licenseNumber', 'licenseState', 'experience']) delete body[k];

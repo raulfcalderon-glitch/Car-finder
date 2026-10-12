@@ -1,6 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import { openDatabase } from '../src/db.js';
 import { createApp } from '../src/app.js';
 
@@ -9,6 +10,17 @@ let base;
 let testDb;
 let uploadsDir;
 let app;
+// A stand-in for Google's signing key, so tests exercise the real token checks.
+const googleKey = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const googleJwk = { ...googleKey.publicKey.export({ format: 'jwk' }), kid: 'test-key', alg: 'RS256', use: 'sig' };
+function googleToken(claims, { key = googleKey.privateKey, kid = 'test-key' } = {}) {
+  const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const body = `${enc({ alg: 'RS256', kid, typ: 'JWT' })}.${enc({
+    iss: 'https://accounts.google.com', aud: 'test-client.apps.googleusercontent.com',
+    exp: Math.floor(Date.now() / 1000) + 3600, email_verified: true, ...claims,
+  })}`;
+  return `${body}.${sign('RSA-SHA256', Buffer.from(body), key).toString('base64url')}`;
+}
 const sentEmails = [];
 let failNextEmail = false;
 
@@ -29,6 +41,8 @@ before(async () => {
     appUrl: 'https://cars.test',
     adminEmails: ['Admin@test.com', ' ', 'boss@test.com'],
     uploadsDir,
+    googleClientId: 'test-client.apps.googleusercontent.com',
+    fetchGoogleCerts: async () => ({ keys: [googleJwk] }),
     // Tests create many accounts from one address; keep the real login limits so they're tested.
     limits: { signupPerIp: { max: 10_000, windowMs: 60_000 }, emailPerIp: { max: 10_000, windowMs: 60_000 } },
   }));
@@ -1197,4 +1211,50 @@ test('link previews: the share image and tags are served', async () => {
   const html = await (await fetch(`${base}/`)).text();
   assert.match(html, /<meta property="og:image" content="https:\/\/carsfindme.com\/og-image.png">/);
   assert.match(html, /twitter:card" content="summary_large_image"/);
+});
+
+test('buyers can continue with Google; dealers cannot', async () => {
+  assert.equal((await client()('GET', '/api/config')).body.googleClientId, 'test-client.apps.googleusercontent.com');
+  const google = (call, claims, extra = {}) => call('POST', '/api/auth/google', { credential: googleToken(claims), ...extra });
+
+  // New buyer: first asked to accept the Terms, then the account is created, confirmed and signed in.
+  const call = client();
+  const claims = { sub: 'g-1', email: 'Gina@Gmail.com', name: 'Gina Lopez' };
+  const first = await google(call, claims);
+  assert.deepEqual(first.body, { needsTerms: true, name: 'Gina Lopez', email: 'gina@gmail.com' });
+  const created = await google(call, claims, { acceptTerms: true });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  assert.equal(created.body.account.role, 'user');
+  assert.equal(created.body.account.emailVerified, true);
+  assert.equal(created.body.account.name, 'Gina Lopez');
+  assert.equal((await call('POST', '/api/requests', { make: 'Porsche', model: 'Google 911' })).status, 201, 'can post right away');
+
+  // Coming back signs into the same account, no Terms step.
+  const again = await google(client(), claims);
+  assert.equal(again.status, 200);
+  assert.equal(again.body.account.id, created.body.account.id);
+
+  // An existing password account with that email gets linked instead of duplicated.
+  const buyer = await signup('user', { email: 'pat@gmail.com' });
+  const linked = await google(client(), { sub: 'g-2', email: 'pat@gmail.com', name: 'Pat' });
+  assert.equal(linked.body.account.id, buyer.account.id);
+  assert.equal((await client()('POST', '/api/login', { email: 'pat@gmail.com', password: 'password123' })).status, 200, 'password still works');
+
+  // Dealers can't use Google, even with a matching email.
+  const dealer = await signup('dealer', { email: 'dealer-g@gmail.com' });
+  assert.equal((await google(client(), { sub: 'g-3', email: dealer.account.email })).status, 403);
+
+  // Forged, expired, wrong-audience and unverified tokens are refused.
+  const other = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const bad = (credential) => client()('POST', '/api/auth/google', { credential, acceptTerms: true });
+  assert.equal((await bad(googleToken({ sub: 'x', email: 'x@gmail.com' }, { key: other.privateKey }))).status, 401);
+  assert.equal((await bad(googleToken({ sub: 'x', email: 'x@gmail.com', exp: 1000 }))).status, 401);
+  assert.equal((await bad(googleToken({ sub: 'x', email: 'x@gmail.com', aud: 'someone-else' }))).status, 401);
+  assert.equal((await bad(googleToken({ sub: 'x', email: 'x@gmail.com', iss: 'evil.com' }))).status, 401);
+  assert.equal((await bad('not-a-token')).status, 401);
+  assert.equal((await bad(googleToken({ sub: 'x', email: 'x@gmail.com', email_verified: false }))).status, 400);
+
+  // Frozen accounts stay locked out.
+  await (await admin())('PATCH', `/api/admin/accounts/${created.body.account.id}`, { frozen: true });
+  assert.equal((await google(client(), claims)).status, 403);
 });

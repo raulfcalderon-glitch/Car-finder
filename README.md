@@ -6,6 +6,7 @@ A two-sided marketplace for enthusiast cars — 911s, BMW M cars, special editio
 - **Dealers** (licensed dealers, and brokers / independent specialists) apply with checkable details — business name, role, phone, address, website, dealer license and state (licensed dealers), track record and references (brokers). An admin works through a checklist (license looked up with the state, website/references checked, publicly listed number called) before they can approve; approved dealers show a **Verified** badge to buyers. They then browse every open request in a searchable, sortable list and respond with what they have and an asking price.
 - **Admins** see every user and dealer with activity and last login, approve dealers, **edit, hide or delete any request**, and **freeze** accounts: a frozen account is signed out and can't sign in, a frozen user's requests are hidden from dealers, and a frozen dealer's responses are hidden from buyers.
 - **Accounts:** signup requires accepting the Terms and Privacy Policy and confirming the email address (needed before posting a request or responding); "forgot password" emails a one-hour, single-use reset link; repeated wrong passwords lock that email out for 15 minutes.
+- **Continue with Google (buyers only):** when `GOOGLE_CLIENT_ID` is set, the log-in and buyer sign-up pages show Google's button. New Google users accept the Terms in one extra step; their email counts as confirmed. A Google sign-in with the email of an existing buyer links to that account; dealer emails are refused (dealers use the application and a password). Tokens are verified in `src/google.js` against Google's published keys, with no extra packages.
 - **Dealer alerts:** approved dealers get an email for each new request — all of them, only certain makes, or off, with an optional minimum budget (set on the **Alerts** page). Emails include a one-click unsubscribe (also via mail apps' `List-Unsubscribe`).
 - **Photos:** dealers can attach up to 6 photos to a response. The browser shrinks them (max 1600px JPEG) before upload; the server checks they're real JPEG/PNG/WebP files and stores them in `uploads/` next to the database (so on the persistent disk). Buyers see them on the request and in the response email.
 - **Profiles:** everyone can upload a profile picture (center-cropped to a square in the browser); without one, a colored circle shows up to two initials (business name for dealers). Dealers' pictures show on their responses, buyers' on their requests.
@@ -34,6 +35,7 @@ Environment variables:
 - `ADMIN_EMAILS` – comma-separated emails of the accounts that can approve dealers (on the **Admin** page) and get an email when a dealer signs up. New dealers stay "waiting for approval" until an admin approves them.
 - `RESEND_API_KEY` – API key from [Resend](https://resend.com) for email alerts. Without it, emails are printed to the server log instead of sent.
 - `EMAIL_FROM` – sender, e.g. `CarsFindMe <alerts@yourdomain.com>` (default `CarsFindMe <onboarding@resend.dev>`, Resend's test sender, which can only deliver to your own Resend account's email until you verify a domain).
+- `GOOGLE_CLIENT_ID` – OAuth Client ID (Web application) from Google Cloud Console; turns on "Continue with Google" for buyers. Add `https://carsfindme.com` (and `http://localhost:3000` for local testing) under **Authorized JavaScript origins**.
 - `APP_URL` – public address used for links in emails (defaults to Render's `RENDER_EXTERNAL_URL`).
 
 ## Backups
@@ -63,6 +65,8 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 | --- | --- | --- | --- |
 | POST | `/api/signup`, `/api/login`, `/api/logout` | anyone | Accounts (`role` is `user` or `dealer`; signup needs `acceptTerms: true`) |
 | GET | `/api/me` | anyone | Current account |
+| GET | `/api/config` | anyone | Public settings for the browser (`googleClientId`) |
+| POST | `/api/auth/google` | anyone | Buyer sign-in/sign-up with a Google ID token (`credential`); returns `needsTerms` for new accounts until `acceptTerms: true` |
 | POST | `/api/contact` | anyone | Contact form: `name`, `email`, `topic`, `message`; stored in `contact_messages` and emailed to admins (honeypot + 5/hour per address) |
 | GET | `/api/public/recent-requests` | anyone | Homepage ticker: year, make, model and trim of the 10 latest open, visible requests (nothing else) |
 | PUT | `/api/me/alerts` | dealer | Alert settings: `mode` (`all`, `makes`, `off`), `makes` (list or comma-separated), `minBudget` |

@@ -62,6 +62,7 @@ export const PRIVACY_HTML = `
 <h2>1. Information we collect</h2>
 <ul>
   <li><strong>Account details:</strong> your name, email address and password (stored only as a secure hash). Dealers also provide a business name and, optionally, a phone number.</li>
+  <li><strong>If you continue with Google:</strong> Google shares your name, email address and a Google account ID with us. We use them only to create your account and sign you in. We don't get your Google password or access to anything else in your Google account.</li>
   <li><strong>What you post:</strong> vehicle requests (make, model, years, budget, condition, color, location, notes) and dealer responses (messages and prices).</li>
   <li><strong>Technical information:</strong> your IP address and basic request details, used to keep the Service secure (for example, to block repeated password guessing), and the date you last signed in.</li>
   <li><strong>Cookies:</strong> one essential cookie that keeps you signed in. We don't use advertising or tracking cookies.</li>
@@ -85,7 +86,7 @@ export const PRIVACY_HTML = `
 <h2>4. Who we share it with</h2>
 <p>We don't sell your personal information or share it for advertising. We share it only:</p>
 <ul>
-  <li>With service providers who help us run the Service, under appropriate confidentiality terms: Render (hosting and data storage), Resend (sending email) and Cloudflare (domain and network services).</li>
+  <li>With service providers who help us run the Service, under appropriate confidentiality terms: Render (hosting and data storage), Resend (sending email), Cloudflare (domain and network services) and Google (only if you choose to sign in with Google).</li>
   <li>If required by law, or to protect the rights, property or safety of our users, the public or CarsFindMe.</li>
   <li>As part of a merger, acquisition or sale of assets, in which case this policy continues to apply to your information.</li>
 </ul>

@@ -27,6 +27,8 @@ const app = createApp(db, {
   adminEmails: [process.env.ADMIN_EMAILS, process.env.ADMIN_EMAIL].filter(Boolean).join(',').split(','),
   // Render sets RENDER_EXTERNAL_URL automatically; APP_URL overrides it (e.g. for a custom domain).
   appUrl: (process.env.APP_URL ?? process.env.RENDER_EXTERNAL_URL ?? `http://localhost:${port}`).replace(/\/+$/, ''),
+  // OAuth Client ID from Google Cloud Console; without it the Google button is hidden.
+  googleClientId: process.env.GOOGLE_CLIENT_ID || null,
   sendEmail: createMailer({
     apiKey: process.env.RESEND_API_KEY,
     from: process.env.EMAIL_FROM ?? 'CarsFindMe <onboarding@resend.dev>',

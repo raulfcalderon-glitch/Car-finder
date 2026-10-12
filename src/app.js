@@ -19,6 +19,7 @@ import {
 } from './email.js';
 import { REQUEST_LIFETIME_DAYS, REMINDER_DAYS_BEFORE } from './db.js';
 import { createLimiter } from './ratelimit.js';
+import { googleCertsFetcher, verifyGoogleIdToken } from './google.js';
 import { normalizeMake } from '../public/vehicles.js';
 import {
   CHECKS,
@@ -429,6 +430,8 @@ export function createApp(
     adminEmails = [],
     limits = {},
     uploadsDir = null, // where dealer photos are stored; photos are disabled without it
+    googleClientId = null, // turns on "Continue with Google" for buyers
+    fetchGoogleCerts = googleCertsFetcher(),
   } = {},
 ) {
   const limiter = Object.fromEntries(
@@ -524,6 +527,13 @@ export function createApp(
       INSERT INTO accounts (email, password_hash, name, role, business_name, phone, status, terms_accepted_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`),
     setPassword: db.prepare('UPDATE accounts SET password_hash = ? WHERE id = ?'),
+    accountByGoogle: db.prepare('SELECT * FROM accounts WHERE google_sub = ?'),
+    linkGoogle: db.prepare(
+      "UPDATE accounts SET google_sub = ?, email_verified_at = COALESCE(email_verified_at, datetime('now')) WHERE id = ?",
+    ),
+    insertGoogleUser: db.prepare(`
+      INSERT INTO accounts (email, password_hash, name, role, status, google_sub, email_verified_at, terms_accepted_at)
+      VALUES (?, ?, ?, 'user', 'active', ?, datetime('now'), datetime('now'))`),
     markVerified: db.prepare("UPDATE accounts SET email_verified_at = COALESCE(email_verified_at, datetime('now')) WHERE id = ?"),
     deleteTokens: db.prepare('DELETE FROM tokens WHERE account_id = ? AND purpose = ?'),
     insertToken: db.prepare(
@@ -1061,6 +1071,50 @@ export function createApp(
       limiter.loginPerAccount.reset(`${email}|${ip}`);
       if (account.frozen_at) throw new HttpError(403, 'This account has been frozen. Please contact CarsFindMe support.');
       startSession(res, account.id, 200, { account: publicAccount(account) });
+    }],
+
+    // Settings the browser needs before anyone signs in.
+    ['GET', /^\/api\/config$/, async (req, res) => {
+      sendJson(res, 200, { googleClientId });
+    }],
+
+    // "Continue with Google" — buyers only. Dealers sign up with the full application and a password.
+    ['POST', /^\/api\/auth\/google$/, async (req, res) => {
+      if (!googleClientId) throw new HttpError(404, 'Google sign-in is not available');
+      const ip = clientIp(req);
+      throttle([['loginPerIp', ip]], { count: false });
+      const body = await readJson(req);
+      const claims = await verifyGoogleIdToken(body.credential, { clientId: googleClientId, fetchCerts: fetchGoogleCerts });
+      if (!claims) {
+        throttle([['loginPerIp', ip]]);
+        throw new HttpError(401, "Google sign-in didn't work. Please try again.");
+      }
+      if (claims.email_verified !== true) throw new HttpError(400, 'Please verify your email with Google first, or sign up with a password.');
+      const email = String(claims.email).toLowerCase();
+
+      let account = q.accountByGoogle.get(claims.sub) ?? q.accountByEmail.get(email);
+      if (account?.role === 'dealer') {
+        throw new HttpError(403, 'This email belongs to a dealer account. Dealers log in with their email and password.');
+      }
+      if (account?.frozen_at) throw new HttpError(403, 'This account has been frozen. Please contact CarsFindMe support.');
+
+      let status = 200;
+      if (account) {
+        // Google has confirmed they own this address, so link it to their existing account.
+        if (account.google_sub !== claims.sub) q.linkGoogle.run(claims.sub, account.id);
+      } else {
+        if (body.acceptTerms !== true) {
+          // The browser shows the Terms checkbox, then sends the same credential again.
+          return sendJson(res, 200, { needsTerms: true, name: claims.name ?? null, email });
+        }
+        throttle([['signupPerIp', ip]]);
+        const name = String(claims.name || claims.given_name || email.split('@')[0]).trim().slice(0, 100);
+        // No password: they can set one later with "Forgot password" if they want.
+        const { lastInsertRowid } = q.insertGoogleUser.run(email, hashPassword(newSessionToken()), name, claims.sub);
+        account = { id: lastInsertRowid };
+        status = 201;
+      }
+      startSession(res, account.id, status, { account: publicAccount(q.accountById.get(account.id)) });
     }],
 
     ['POST', /^\/api\/logout$/, async (req, res) => {

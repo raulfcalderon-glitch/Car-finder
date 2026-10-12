@@ -425,3 +425,10 @@ label:has(> .suggestions), .make-field label { position: relative; }
 .response-actions { margin-top: 10px; }
 .edit-response { margin-top: 10px; }
 .clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Continue with Google */
+.google-box:empty { display: none; }
+.google-button { display: flex; justify-content: center; min-height: 44px; }
+.google-note { text-align: center; margin: 8px 0 0; font-size: .85rem; color: var(--muted); }
+.or-divider { display: flex; align-items: center; gap: 12px; margin: 16px 0 8px; color: var(--muted); font-size: .85rem; }
+.or-divider::before, .or-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
