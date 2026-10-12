@@ -74,13 +74,25 @@ const wrap = (body) =>
   `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;color:#1b1f24;line-height:1.5">${body}</div>`;
 
 // Email to an admin when a new dealer signs up and needs approval.
-export function newDealerEmail({ dealer, to, appUrl }) {
-  const link = `${appUrl}/#/admin`;
+const EMAIL_SIGNALS = {
+  match: '✓ Matches their website domain',
+  free: 'Free email provider (e.g. Gmail) — check more carefully',
+  other: "Doesn't match their website",
+};
+
+export function newDealerEmail({ dealer, to, appUrl, emailSignal }) {
+  const link = `${appUrl}/#/admin/account/${dealer.id}`;
   const details = [
+    ['Type', dealer.dealer_type === 'broker' ? 'Broker / independent specialist' : 'Licensed dealer'],
     ['Business', dealer.business_name],
-    ['Name', dealer.name],
+    ['Name', [dealer.name, dealer.job_title].filter(Boolean).join(' — ')],
     ['Email', dealer.email],
+    ['Email check', EMAIL_SIGNALS[emailSignal]],
     ['Phone', dealer.phone],
+    ['Address', dealer.business_address],
+    ['Website', dealer.website],
+    ['License', dealer.license_number ? `${dealer.license_number} (${dealer.license_state})` : null],
+    ['Track record', dealer.experience],
   ].filter(([, v]) => v);
 
   return {
@@ -90,13 +102,13 @@ export function newDealerEmail({ dealer, to, appUrl }) {
     text:
       `A new dealer signed up for CarsFindMe and is waiting for approval.\n\n` +
       details.map(([k, v]) => `${k}: ${v}`).join('\n') +
-      `\n\nReview and approve: ${link}\n— CarsFindMe`,
+      `\n\nVerify and approve: ${link}\n— CarsFindMe`,
     html: wrap(`
       <p>A new dealer signed up for CarsFindMe and is waiting for approval.</p>
       <table style="border-collapse:collapse;margin:12px 0">${details
         .map(([k, v]) => `<tr><td style="color:#5f6b7a;padding:2px 16px 2px 0">${esc(k)}</td><td>${esc(v)}</td></tr>`)
         .join('')}</table>
-      <p>${button(link, 'Review dealers')}</p>`),
+      <p>${button(link, 'Verify this dealer')}</p>`),
   };
 }
 

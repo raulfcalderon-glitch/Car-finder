@@ -280,3 +280,20 @@ fieldset.stack .makes-field input { width: 100%; }
 .profile-row { display: flex; gap: 20px; align-items: center; margin: 8px 0 16px; }
 .profile-name { display: block; font-size: 1.2rem; }
 .profile label.button { font-weight: 600; }
+
+/* dealer verification */
+.signup-card { max-width: 620px; margin: 0 auto; }
+.verify-explainer { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 14px 16px; background: var(--bg); }
+.verify-explainer p, .verify-explainer ol { margin: 6px 0; }
+.verify-explainer ol { padding-left: 20px; }
+.next-steps { text-align: left; margin: 0 auto 12px; max-width: 420px; }
+.verified-badge {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 2px 8px; border-radius: 999px;
+  font-size: .74rem; font-weight: 700; color: var(--ok); border: 1px solid currentColor; white-space: nowrap; vertical-align: middle;
+}
+.lookups { gap: 16px; font-size: .92rem; }
+.checklist { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 8px; }
+.check { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.check.done { background: var(--bg); }
+.check-box { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--border); display: grid; place-items: center; font-weight: 700; color: #fff; }
+.check.done .check-box { background: var(--ok); border-color: var(--ok); }

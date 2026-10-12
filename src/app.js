@@ -13,6 +13,16 @@ import {
   newRequestAlertEmail,
 } from './email.js';
 import { createLimiter } from './ratelimit.js';
+import {
+  CHECKS,
+  DEALER_TYPES,
+  emailDomainSignal,
+  isVerifiedDealer,
+  missingChecks,
+  parseChecks,
+  requiredChecks,
+  websiteHost,
+} from './verification.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 const MAX_BODY_BYTES = 64 * 1024;
@@ -108,6 +118,28 @@ function parseRequestFields(body) {
   return fields;
 }
 
+// What a dealer tells us about their business when they apply.
+function parseDealerApplication(body) {
+  const type = oneOf(body.dealerType, 'Dealer type', DEALER_TYPES, null);
+  if (!type) throw new HttpError(400, 'Tell us whether you are a licensed dealer or a broker');
+  const isDealer = type === 'dealer';
+  const app = {
+    dealer_type: type,
+    job_title: str(body.jobTitle, 'Your role', { required: true, max: 80 }),
+    business_address: str(body.businessAddress, 'Business address', { required: true, max: 200 }),
+    website: str(body.website, 'Website', { required: isDealer, max: 200 }),
+    license_number: str(body.licenseNumber, 'Dealer license number', { required: isDealer, max: 60 }),
+    license_state: str(body.licenseState, 'License state', { required: isDealer, max: 40 }),
+    experience: str(body.experience, 'Track record', { required: !isDealer, max: 2000 }),
+  };
+  if (app.website && !websiteHost(app.website)) throw new HttpError(400, 'Enter a valid website address');
+  if (app.license_number && !app.license_state) throw new HttpError(400, 'Which state issued your license?');
+  if (!isDealer && app.experience.length < 40) {
+    throw new HttpError(400, 'Tell us a bit more about your track record (a few sentences)');
+  }
+  return app;
+}
+
 // ---------- serializers ----------
 
 // Full account details, for admin screens only.
@@ -132,6 +164,23 @@ function serializeAdminAccount(a, isAdmin) {
     requestCount: a.request_count ?? undefined,
     openRequestCount: a.open_request_count ?? undefined,
     responseCount: a.response_count ?? undefined,
+    dealer:
+      a.role === 'dealer'
+        ? {
+            type: a.dealer_type ?? 'dealer',
+            jobTitle: a.job_title,
+            businessAddress: a.business_address,
+            website: a.website,
+            licenseNumber: a.license_number,
+            licenseState: a.license_state,
+            experience: a.experience,
+            emailSignal: emailDomainSignal(a.email, a.website),
+            checks: parseChecks(a),
+            requiredChecks: requiredChecks(a),
+            missingChecks: missingChecks(a),
+            verified: isVerifiedDealer(a),
+          }
+        : undefined,
   };
 }
 
@@ -173,6 +222,14 @@ function serializeResponse(r, photos = []) {
       email: r.dealer_email,
       phone: r.dealer_phone,
       avatarUrl: photoUrl(r.dealer_avatar),
+      type: r.dealer_type ?? 'dealer',
+      verified: isVerifiedDealer({
+        role: 'dealer',
+        status: r.dealer_status,
+        dealer_type: r.dealer_type,
+        license_number: r.dealer_license_number,
+        verification_checks: r.dealer_checks,
+      }),
     },
   };
 }
@@ -326,6 +383,8 @@ export function createApp(
       avatarUrl: photoUrl(a.avatar),
       isAdmin: isAdmin(a),
       alerts: a.role === 'dealer' ? alertSettings(a) : undefined,
+      dealerType: a.role === 'dealer' ? (a.dealer_type ?? 'dealer') : undefined,
+      verified: a.role === 'dealer' ? isVerifiedDealer(a) : undefined,
     };
   }
 
@@ -400,6 +459,11 @@ export function createApp(
         AND COALESCE(alert_mode, 'all') != 'off'`),
     setAlertToken: db.prepare('UPDATE accounts SET alert_token = ? WHERE id = ?'),
     setAvatar: db.prepare('UPDATE accounts SET avatar = ? WHERE id = ?'),
+    setDealerApplication: db.prepare(`
+      UPDATE accounts SET dealer_type = :dealer_type, job_title = :job_title, business_address = :business_address,
+        website = :website, license_number = :license_number, license_state = :license_state, experience = :experience
+      WHERE id = :id`),
+    setChecks: db.prepare('UPDATE accounts SET verification_checks = ? WHERE id = ?'),
     setAlerts: db.prepare('UPDATE accounts SET alert_mode = ?, alert_makes = ?, alert_min_budget = ? WHERE id = ?'),
     unsubscribeAlerts: db.prepare("UPDATE accounts SET alert_mode = 'off' WHERE alert_token = ? AND role = 'dealer'"),
     setAccountStatus: db.prepare('UPDATE accounts SET status = ? WHERE id = ?'),
@@ -416,7 +480,8 @@ export function createApp(
       FROM responses x JOIN requests r ON r.id = x.request_id
       WHERE x.dealer_id = ? ORDER BY x.created_at DESC, x.id DESC`),
     adminResponsesForRequest: db.prepare(`
-      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar,
+      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar, a.dealer_type, a.license_number AS dealer_license_number,
+        a.verification_checks AS dealer_checks, a.status AS dealer_status,
         a.frozen_at AS dealer_frozen_at
       FROM responses x JOIN accounts a ON a.id = x.dealer_id
       WHERE x.request_id = ? ORDER BY x.created_at ASC, x.id ASC`),
@@ -442,11 +507,13 @@ export function createApp(
       SELECT r.*, (SELECT COUNT(*) FROM visible_responses x WHERE x.request_id = r.id) AS response_count
       FROM requests r WHERE r.user_id = ? ORDER BY r.created_at DESC, r.id DESC`),
     responsesForRequest: db.prepare(`
-      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar
+      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar, a.dealer_type, a.license_number AS dealer_license_number,
+        a.verification_checks AS dealer_checks, a.status AS dealer_status
       FROM visible_responses x JOIN accounts a ON a.id = x.dealer_id
       WHERE x.request_id = ? ORDER BY x.created_at ASC, x.id ASC`),
     responsesForRequestByDealer: db.prepare(`
-      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar
+      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar, a.dealer_type, a.license_number AS dealer_license_number,
+        a.verification_checks AS dealer_checks, a.status AS dealer_status
       FROM responses x JOIN accounts a ON a.id = x.dealer_id
       WHERE x.request_id = ? AND x.dealer_id = ? ORDER BY x.created_at ASC, x.id ASC`),
     insertResponse: db.prepare('INSERT INTO responses (request_id, dealer_id, message, price) VALUES (?, ?, ?, ?)'),
@@ -455,7 +522,8 @@ export function createApp(
     photosForRequest: db.prepare(`
       SELECT p.filename FROM response_photos p JOIN responses x ON x.id = p.response_id WHERE x.request_id = ?`),
     responseById: db.prepare(`
-      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar
+      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar, a.dealer_type, a.license_number AS dealer_license_number,
+        a.verification_checks AS dealer_checks, a.status AS dealer_status
       FROM responses x JOIN accounts a ON a.id = x.dealer_id WHERE x.id = ?`),
     distinctMakes: db.prepare(
       "SELECT DISTINCT make FROM visible_requests WHERE status = 'open' ORDER BY make COLLATE NOCASE",
@@ -745,19 +813,22 @@ export function createApp(
       const role = oneOf(body.role, 'Account type', ['user', 'dealer'], null);
       if (!role) throw new HttpError(400, 'Account type is required');
       const businessName = str(body.businessName, 'Business name', { required: role === 'dealer', max: 120 });
-      const phone = str(body.phone, 'Phone', { max: 40 });
+      const phone = str(body.phone, 'Business phone', { required: role === 'dealer', max: 40 });
+      const application = role === 'dealer' ? parseDealerApplication(body) : null;
       if (body.acceptTerms !== true) throw new HttpError(400, 'Please accept the Terms of Service and Privacy Policy');
       if (q.accountByEmail.get(email)) throw new HttpError(409, 'An account with that email already exists');
       throttle([['signupPerIp', clientIp(req)]]);
 
       const status = role === 'dealer' && !admins.has(email) ? 'pending' : 'active';
       const { lastInsertRowid } = q.insertAccount.run(email, hashPassword(password), name, role, businessName, phone, status);
+      if (application) q.setDealerApplication.run({ ...application, id: lastInsertRowid });
       const account = q.accountById.get(lastInsertRowid);
       startSession(res, account.id, 201, { account: publicAccount(account) });
       sendVerification(account);
 
       if (status === 'pending') {
-        for (const to of admins) notify(newDealerEmail({ dealer: account, to, appUrl }));
+        const emailSignal = emailDomainSignal(account.email, account.website);
+        for (const to of admins) notify(newDealerEmail({ dealer: account, to, appUrl, emailSignal }));
       }
     }],
 
@@ -1023,9 +1094,23 @@ export function createApp(
       if (!target) throw new HttpError(404, 'Account not found');
       const body = await readJson(req);
 
+      if (body.check !== undefined) {
+        if (target.role !== 'dealer') throw new HttpError(400, 'Only dealer accounts have verification checks');
+        const key = oneOf(body.check, 'Check', Object.keys(CHECKS), null);
+        const checks = parseChecks(target);
+        if (body.done === false) delete checks[key];
+        else checks[key] = { at: new Date().toISOString(), by: me.email, note: str(body.note, 'Note', { max: 300 }) };
+        target.verification_checks = JSON.stringify(checks);
+        q.setChecks.run(target.verification_checks, target.id);
+      }
       if (body.status !== undefined) {
         if (target.role !== 'dealer') throw new HttpError(400, 'Only dealer accounts have an approval status');
-        q.setAccountStatus.run(oneOf(body.status, 'Status', ACCOUNT_STATUSES, target.status), target.id);
+        const status = oneOf(body.status, 'Status', ACCOUNT_STATUSES, target.status);
+        const missing = missingChecks(target);
+        if (status === 'active' && target.status !== 'active' && missing.length) {
+          throw new HttpError(400, `Finish verifying this dealer first: ${missing.map((k) => CHECKS[k].toLowerCase()).join('; ')}.`);
+        }
+        q.setAccountStatus.run(status, target.id);
       }
       if (body.frozen === true) {
         if (target.id === me.id || isAdmin(target)) throw new HttpError(400, "Admin accounts can't be frozen");

@@ -3,7 +3,7 @@
 A two-sided marketplace for enthusiast cars — 911s, BMW M cars, special editions and exotics. Live at [carsfindme.com](https://carsfindme.com).
 
 - **Users** (buyers) post a request for the exact car they want — e.g. a 1987 Porsche 911 Carrera — with year range, budget, condition, color, location and notes.
-- **Dealers** (specialty dealerships, brokers, people in the car business) are approved by an admin, then browse every open request in a searchable, sortable list and respond with what they have and an asking price.
+- **Dealers** (licensed dealers, and brokers / independent specialists) apply with checkable details — business name, role, phone, address, website, dealer license and state (licensed dealers), track record and references (brokers). An admin works through a checklist (license looked up with the state, website/references checked, publicly listed number called) before they can approve; approved dealers show a **Verified** badge to buyers. They then browse every open request in a searchable, sortable list and respond with what they have and an asking price.
 - **Admins** see every user and dealer with activity and last login, approve dealers, **edit, hide or delete any request**, and **freeze** accounts: a frozen account is signed out and can't sign in, a frozen user's requests are hidden from dealers, and a frozen dealer's responses are hidden from buyers.
 - **Accounts:** signup requires accepting the Terms and Privacy Policy and confirming the email address (needed before posting a request or responding); "forgot password" emails a one-hour, single-use reset link; repeated wrong passwords lock that email out for 15 minutes.
 - **Dealer alerts:** approved dealers get an email for each new request — all of them, only certain makes, or off, with an optional minimum budget (set on the **Alerts** page). Emails include a one-click unsubscribe (also via mail apps' `List-Unsubscribe`).
@@ -45,6 +45,7 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 - `src/auth.js` – scrypt password hashing and session tokens (HttpOnly cookie).
 - `src/email.js` – emails (alerts, confirmations, password resets) via Resend's HTTP API.
 - `src/ratelimit.js` – in-memory limits on login attempts and outgoing account emails.
+- `src/verification.js` – dealer verification rules: required checks, the Verified badge, email-domain signal.
 - `public/` – the single-page front end in plain HTML/CSS/JS.
 - `test/` – API tests using `node:test`.
 
@@ -71,7 +72,7 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 | GET | `/api/admin/stats` | admin | Dashboard totals (users, dealers, open requests, recent activity, frozen) |
 | GET | `/api/admin/accounts?role=dealer` | admin | Users or dealers with activity counts and last login; `status` (`all`, `active`, `pending`, `rejected`, `frozen`), `q`, `sort` (`newest`, `oldest`, `name`, `last_login`, `activity`) |
 | GET | `/api/admin/accounts/:id` | admin | One account with its requests (users) or responses (dealers) |
-| PATCH | `/api/admin/accounts/:id` | admin | `status` approves/rejects a dealer; `verified: true` confirms their email; `frozen: true` (with optional `reason`) or `false` freezes/unfreezes any non-admin account |
+| PATCH | `/api/admin/accounts/:id` | admin | `check` (`license`, `web`, `call`) with `done` and optional `note` records a verification step; `status` approves (only once required checks are done) or rejects a dealer; `verified: true` confirms their email; `frozen: true` (with optional `reason`) or `false` freezes/unfreezes any non-admin account |
 | GET | `/api/admin/requests` | admin | Every request with buyer details; `q` (vehicle, notes, location, buyer name/email, `#id`), `status` (`open` default, `fulfilled`, `closed`, `all`), `visibility` (`all`, `visible`, `hidden`), `sort` |
 | PATCH | `/api/admin/requests/:id` | admin | Edit any request field, set `status`, or `hidden: true` (with optional `reason`) / `false` to hide it from dealers |
 | DELETE | `/api/admin/requests/:id` | admin | Permanently delete a request and its responses |

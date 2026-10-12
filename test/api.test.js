@@ -82,6 +82,26 @@ async function admin() {
   return adminClient;
 }
 
+// What a licensed dealer fills in at signup.
+const DEALER_APPLICATION = {
+  businessName: 'Test Motors',
+  dealerType: 'dealer',
+  jobTitle: 'Owner',
+  phone: '555-0100',
+  businessAddress: '1 Main St, Miami, FL',
+  website: 'testmotors.example',
+  licenseNumber: 'VI-12345',
+  licenseState: 'Florida',
+};
+
+async function completeChecks(id) {
+  const adminCall = await admin();
+  for (const check of ['license', 'web', 'call']) {
+    const res = await adminCall('PATCH', `/api/admin/accounts/${id}`, { check, done: true });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+  }
+}
+
 // Signs up an account and confirms its email. Dealers are approved by the admin unless
 // { approve: false } is passed; pass { verify: false } to leave the email unconfirmed.
 async function signup(role, { approve = true, verify = true, ...extra } = {}) {
@@ -91,7 +111,7 @@ async function signup(role, { approve = true, verify = true, ...extra } = {}) {
     password: 'password123',
     name: `Test ${role}`,
     role,
-    businessName: role === 'dealer' ? 'Test Motors' : undefined,
+    ...(role === 'dealer' ? DEALER_APPLICATION : {}),
     acceptTerms: true,
     ...extra,
   });
@@ -99,6 +119,7 @@ async function signup(role, { approve = true, verify = true, ...extra } = {}) {
   call.account = res.body.account;
   if (verify) await confirmEmail(call, call.account.email);
   if (role === 'dealer' && approve) {
+    await completeChecks(call.account.id);
     const approved = await (await admin())('PATCH', `/api/admin/accounts/${call.account.id}`, { status: 'active' });
     assert.equal(approved.status, 200, JSON.stringify(approved.body));
   }
@@ -301,7 +322,11 @@ test('new dealers wait for admin approval before seeing requests', async () => {
   assert.equal((await adminCall('PATCH', `/api/admin/accounts/${buyer.account.id}`, { status: 'active' })).status, 400, 'buyers have no approval status');
   assert.equal((await adminCall('PATCH', `/api/admin/accounts/${dealer.account.id}`, { status: 'bogus' })).status, 400);
 
-  // Approving lets them in and emails them.
+  // Approving needs the verification checks done; then it lets them in and emails them.
+  const early = await adminCall('PATCH', `/api/admin/accounts/${dealer.account.id}`, { status: 'active' });
+  assert.equal(early.status, 400);
+  assert.match(early.body.error, /Finish verifying/);
+  await completeChecks(dealer.account.id);
   sentEmails.length = 0;
   assert.equal((await adminCall('PATCH', `/api/admin/accounts/${dealer.account.id}`, { status: 'active' })).body.account.status, 'active');
   await new Promise((r) => setTimeout(r, 20));
@@ -325,7 +350,7 @@ test('new dealers wait for admin approval before seeing requests', async () => {
 
 test('an admin who signs up as a dealer is approved automatically', async () => {
   const res = await client()('POST', '/api/signup', {
-    email: 'Boss@test.com', password: 'password123', name: 'Boss', role: 'dealer', businessName: 'Boss Cars', acceptTerms: true,
+    ...DEALER_APPLICATION, email: 'Boss@test.com', password: 'password123', name: 'Boss', role: 'dealer', businessName: 'Boss Cars', acceptTerms: true,
   });
   assert.equal(res.status, 201);
   assert.equal(res.body.account.status, 'active');
@@ -787,4 +812,94 @@ test('users and dealers can set and remove a profile picture', async () => {
   const removed = await buyer('DELETE', '/api/me/avatar');
   assert.equal(removed.body.account.avatarUrl, null);
   assert.equal(existsSync(`${uploadsDir}/${second.split('/').pop()}`), false);
+});
+
+test('dealer applications collect checkable details', async () => {
+  const apply = (extra) =>
+    client()('POST', '/api/signup', {
+      email: `applicant${++n}@test.com`, password: 'password123', name: 'Applicant', role: 'dealer', acceptTerms: true,
+      ...DEALER_APPLICATION, ...extra,
+    });
+  // Licensed dealers must give a license, its state, and a website.
+  assert.match((await apply({ licenseNumber: '' })).body.error, /license number/i);
+  assert.match((await apply({ licenseState: '' })).body.error, /state/i);
+  assert.match((await apply({ website: '' })).body.error, /Website/);
+  assert.match((await apply({ website: 'not a website at all' })).body.error, /valid website/);
+  assert.match((await apply({ dealerType: 'collector' })).body.error, /Dealer type/);
+  assert.match((await apply({ phone: '' })).body.error, /Business phone/);
+  assert.match((await apply({ businessAddress: '' })).body.error, /address/);
+
+  // Brokers don't need a license or website, but must describe their track record.
+  const broker = { dealerType: 'broker', licenseNumber: '', licenseState: '', website: '' };
+  assert.match((await apply({ ...broker })).body.error, /Track record/);
+  assert.match((await apply({ ...broker, experience: 'Trust me.' })).body.error, /a bit more/);
+  const ok = await apply({ ...broker, experience: 'Sourced 40+ air-cooled 911s since 2015 via Bring a Trailer and PCA contacts.' });
+  assert.equal(ok.status, 201);
+  assert.equal(ok.body.account.dealerType, 'broker');
+  assert.equal(ok.body.account.verified, false);
+});
+
+test('admins work through a verification checklist before approving', async () => {
+  const adminCall = await admin();
+  sentEmails.length = 0;
+  const dealer = await signup('dealer', {
+    approve: false, email: 'owner@ruf-specialists.example', website: 'https://www.ruf-specialists.example', businessName: 'RUF Specialists',
+  });
+  const gmailDealer = await signup('dealer', { approve: false, email: 'quickcash4cars@gmail.com' });
+  await tick();
+
+  // The admin email carries the application and the email-domain signal.
+  const alert = sentEmails.find((e) => /waiting for approval: RUF Specialists/.test(e.subject));
+  assert.match(alert.text, /License: VI-12345 \(Florida\)/);
+  assert.match(alert.text, /Matches their website domain/);
+  assert.match(alert.text, new RegExp(`/#/admin/account/${dealer.account.id}`));
+
+  const detail = (await adminCall('GET', `/api/admin/accounts/${dealer.account.id}`)).body.account.dealer;
+  assert.equal(detail.emailSignal, 'match');
+  assert.deepEqual(detail.requiredChecks, ['license', 'web', 'call']);
+  assert.deepEqual(detail.missingChecks, ['license', 'web', 'call']);
+  assert.equal((await adminCall('GET', `/api/admin/accounts/${gmailDealer.account.id}`)).body.account.dealer.emailSignal, 'free');
+
+  // Checks record who did them and when; they can be undone.
+  const checked = await adminCall('PATCH', `/api/admin/accounts/${dealer.account.id}`, { check: 'call', done: true, note: 'Spoke to Maria' });
+  const call = checked.body.account.dealer.checks.call;
+  assert.equal(call.by, 'admin@test.com');
+  assert.equal(call.note, 'Spoke to Maria');
+  assert.ok(call.at);
+  assert.deepEqual(checked.body.account.dealer.missingChecks, ['license', 'web']);
+  const undone = await adminCall('PATCH', `/api/admin/accounts/${dealer.account.id}`, { check: 'call', done: false });
+  assert.equal(undone.body.account.dealer.checks.call, undefined);
+  assert.equal((await adminCall('PATCH', `/api/admin/accounts/${dealer.account.id}`, { check: 'vibes', done: true })).status, 400);
+  const buyer = await signup('user');
+  assert.equal((await adminCall('PATCH', `/api/admin/accounts/${buyer.account.id}`, { check: 'call', done: true })).status, 400);
+
+  // Approval is blocked until every required check is done, then the dealer is verified.
+  assert.match((await adminCall('PATCH', `/api/admin/accounts/${dealer.account.id}`, { status: 'active' })).body.error, /license looked up/);
+  await completeChecks(dealer.account.id);
+  const approved = await adminCall('PATCH', `/api/admin/accounts/${dealer.account.id}`, { status: 'active' });
+  assert.equal(approved.body.account.dealer.verified, true);
+  assert.equal((await dealer('GET', '/api/me')).body.account.verified, true);
+
+  // Buyers see the badge on that dealer's responses.
+  const { body } = await buyer('POST', '/api/requests', { make: 'RUF', model: 'CTR Yellowbird' });
+  await dealer('POST', `/api/requests/${body.request.id}/responses`, { message: 'We know where one is' });
+  const response = (await buyer('GET', `/api/requests/${body.request.id}`)).body.responses[0];
+  assert.equal(response.dealer.verified, true);
+  assert.equal(response.dealer.type, 'dealer');
+});
+
+test('brokers without a license only need the website and call checks', async () => {
+  const adminCall = await admin();
+  const broker = await signup('dealer', {
+    approve: false, dealerType: 'broker', licenseNumber: '', licenseState: '', website: '',
+    experience: 'Twelve years sourcing Ferrari classiche cars for collectors; references from three Ferrari dealers.',
+  });
+  const detail = (await adminCall('GET', `/api/admin/accounts/${broker.account.id}`)).body.account.dealer;
+  assert.deepEqual(detail.requiredChecks, ['web', 'call']);
+  await adminCall('PATCH', `/api/admin/accounts/${broker.account.id}`, { check: 'web', done: true });
+  await adminCall('PATCH', `/api/admin/accounts/${broker.account.id}`, { check: 'call', done: true });
+  const approved = await adminCall('PATCH', `/api/admin/accounts/${broker.account.id}`, { status: 'active' });
+  assert.equal(approved.status, 200);
+  assert.equal(approved.body.account.dealer.verified, true);
+  assert.equal(approved.body.account.dealer.type, 'broker');
 });

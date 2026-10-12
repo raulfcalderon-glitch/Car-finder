@@ -27,6 +27,15 @@ const SCHEMA = `
     alert_min_budget INTEGER,
     alert_token      TEXT, -- secret for one-click unsubscribe links
     avatar           TEXT, -- profile picture filename in the uploads folder
+    -- Dealer application details, collected at signup and checked by an admin before approval.
+    dealer_type      TEXT, -- 'dealer' (licensed dealer) or 'broker' (broker / independent specialist)
+    job_title        TEXT,
+    business_address TEXT,
+    website          TEXT,
+    license_number   TEXT,
+    license_state    TEXT,
+    experience       TEXT, -- brokers: their sourcing track record and references
+    verification_checks TEXT, -- JSON: { license|web|call: { at, by, note } }
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -125,7 +134,8 @@ function migrate(db) {
     db.exec(`ALTER TABLE accounts ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
       CHECK (status IN ('active', 'pending', 'rejected'))`);
   }
-  for (const column of ['frozen_at', 'frozen_reason', 'last_login_at', 'terms_accepted_at', 'alert_mode', 'alert_makes', 'alert_token', 'avatar']) {
+  for (const column of ['frozen_at', 'frozen_reason', 'last_login_at', 'terms_accepted_at', 'alert_mode', 'alert_makes', 'alert_token', 'avatar',
+    'dealer_type', 'job_title', 'business_address', 'website', 'license_number', 'license_state', 'experience', 'verification_checks']) {
     if (!columns.includes(column)) db.exec(`ALTER TABLE accounts ADD COLUMN ${column} TEXT`);
   }
   if (!columns.includes('alert_min_budget')) db.exec('ALTER TABLE accounts ADD COLUMN alert_min_budget INTEGER');

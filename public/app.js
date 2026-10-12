@@ -83,6 +83,10 @@ const go = (hash) => {
 
 // ---------- nav ----------
 
+const US_STATES = ['Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware', 'District of Columbia', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 'Michigan', 'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada', 'New Hampshire', 'New Jersey', 'New Mexico', 'New York', 'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota', 'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington', 'West Virginia', 'Wisconsin', 'Wyoming', 'Outside the US'];
+
+const verifiedBadge = (type) => `<span class="verified-badge" title="CarsFindMe checked this ${type === 'broker' ? "broker's references" : "dealer's license"}, website and phone">✓ Verified ${type === 'broker' ? 'broker' : 'dealer'}</span>`;
+
 // ---------- avatars ----------
 
 // Up to two initials: "Stuttgart Classics" → SC, "Raul Calderon" → RC, "Porsche" → P.
@@ -394,17 +398,49 @@ function signup(params) {
     return;
   }
   view.innerHTML = `
-    <div class="narrow card">
+    <div class="card signup-card">
       <h1>Create an account</h1>
       <form>
         <fieldset>
           <label><input type="radio" name="role" value="user" ${role === 'user' ? 'checked' : ''}> I'm looking for a car</label>
-          <label><input type="radio" name="role" value="dealer" ${role === 'dealer' ? 'checked' : ''}> I'm a dealer</label>
+          <label><input type="radio" name="role" value="dealer" ${role === 'dealer' ? 'checked' : ''}> I'm a dealer or broker</label>
         </fieldset>
+
+        <div class="verify-explainer dealer-only">
+          <strong>How we verify dealers</strong>
+          <p>To protect buyers, every dealer and broker is reviewed before they can see requests. We'll:</p>
+          <ol>
+            <li>Look up your dealer license with the issuing state (brokers: if you have one).</li>
+            <li>Check that your website, Google listing or references match the details below.</li>
+            <li>Call your business at its <em>publicly listed</em> number to confirm you work there.</li>
+          </ol>
+          <p class="muted">Most reviews take 1–2 business days. Verified accounts get a <span class="verified-badge">✓ Verified</span> badge buyers can see.</p>
+        </div>
+
+        <fieldset class="dealer-only">
+          <label><input type="radio" name="dealerType" value="dealer" checked> Licensed dealer</label>
+          <label><input type="radio" name="dealerType" value="broker"> Broker / independent specialist</label>
+        </fieldset>
+
         <label>Your name <input name="name" autocomplete="name" required></label>
-        <label class="dealer-only">Dealership / business name <input name="businessName" autocomplete="organization"></label>
-        <label>Email <input name="email" type="email" autocomplete="email" required></label>
-        <label class="dealer-only">Phone <span class="hint">shown to buyers you respond to</span><input name="phone" type="tel" autocomplete="tel"></label>
+        <label class="dealer-only">Your role <span class="hint">e.g. Owner, Sales Manager</span><input name="jobTitle" autocomplete="organization-title" data-required="dealer broker"></label>
+        <label class="dealer-only">Business name <span class="hint">as registered</span><input name="businessName" autocomplete="organization" data-required="dealer broker"></label>
+        <label>Email <span class="hint dealer-only">a business address on your own domain speeds up review</span><input name="email" type="email" autocomplete="email" required></label>
+        <div class="grid-2 dealer-only">
+          <label>Business phone <span class="hint">shown to buyers you respond to</span><input name="phone" type="tel" autocomplete="tel" data-required="dealer broker"></label>
+          <label>Website <span class="hint broker-only">optional</span><input name="website" placeholder="yourdealership.com" autocomplete="url" data-required="dealer"></label>
+        </div>
+        <label class="dealer-only">Business address <input name="businessAddress" placeholder="Street, city, state" autocomplete="street-address" data-required="dealer broker"></label>
+        <div class="grid-2 dealer-only">
+          <label>Dealer license number <span class="hint broker-only">if you have one</span><input name="licenseNumber" data-required="dealer"></label>
+          <label>Issuing state
+            <select name="licenseState" data-required="dealer"><option value="">Select…</option>${US_STATES.map((st) => `<option>${st}</option>`).join('')}</select>
+          </label>
+        </div>
+        <label class="broker-only">Your track record <span class="hint">what you've sourced, how long you've done it, and references we can check (auction history, clubs, dealers you work with)</span>
+          <textarea name="experience" data-required="broker" minlength="40"></textarea>
+        </label>
+
         <label>Password <span class="hint">at least 8 characters</span><input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
         <label class="checkbox"><input type="checkbox" name="acceptTerms" required> <span>I'm 18 or older and agree to the <a href="#/terms" target="_blank">Terms of Service</a> and <a href="#/privacy" target="_blank">Privacy Policy</a>.</span></label>
         <p class="error"></p>
@@ -413,15 +449,20 @@ function signup(params) {
       </form>
     </div>`;
   const form = view.querySelector('form');
+  // Show the fields for the chosen account type, and only require the ones that are visible.
   const syncRole = () => {
     const isDealer = form.role.value === 'dealer';
+    const kind = isDealer ? form.dealerType.value : 'user';
     form.querySelectorAll('.dealer-only').forEach((el) => (el.hidden = !isDealer));
-    form.businessName.required = isDealer;
+    form.querySelectorAll('.broker-only').forEach((el) => (el.hidden = kind !== 'broker'));
+    form.querySelectorAll('[data-required]').forEach((el) => (el.required = el.dataset.required.split(' ').includes(kind)));
   };
   form.addEventListener('change', syncRole);
   syncRole();
   bindForm(form, async (data) => {
-    me = (await api('/api/signup', { method: 'POST', body: { ...data, acceptTerms: data.acceptTerms === 'on' } })).account;
+    const body = { ...data, acceptTerms: data.acceptTerms === 'on' };
+    if (body.role !== 'dealer') for (const k of ['dealerType', 'jobTitle', 'website', 'businessAddress', 'licenseNumber', 'licenseState', 'experience']) delete body[k];
+    me = (await api('/api/signup', { method: 'POST', body })).account;
     go(home());
   });
 }
@@ -782,7 +823,7 @@ async function requestDetail(id) {
           (x) => `
         <div class="card response">
           <div class="row spread">
-            <strong class="with-avatar">${avatar({ ...x.dealer, role: 'dealer' }, 40)}<span>${esc(x.dealer.businessName || x.dealer.name)}</span>${
+            <strong class="with-avatar">${avatar({ ...x.dealer, role: 'dealer' }, 40)}<span>${esc(x.dealer.businessName || x.dealer.name)}</span>${x.dealer.verified ? verifiedBadge(x.dealer.type) : ''}${
               isAdminView ? ` <a class="muted" href="#/admin/account/${x.dealer.id}">view dealer</a>` : ''
             }${x.dealerFrozen ? ' <span class="pill closed">frozen — hidden from buyer</span>' : ''}</strong>
             <span class="muted">${ago(x.createdAt)}</span>
@@ -981,8 +1022,15 @@ function dealerNotApproved() {
       ${
         rejected
           ? `<p class="muted">Your dealer account for ${esc(me.businessName)} wasn't approved. If you think this is a mistake, reply to any CarsFindMe email or contact us.</p>`
-          : `<p>We review every dealer before they can see buyer requests, to keep buyers' information safe.</p>
-             <p class="muted">You'll get an email at <strong>${esc(me.email)}</strong> as soon as <strong>${esc(me.businessName)}</strong> is approved.</p>
+          : `<p>We review every dealer and broker before they can see buyer requests, to keep buyers safe. Here's what happens next:</p>
+             <ol class="next-steps">
+               <li>We look up ${me.dealerType === 'broker' ? 'any license you gave us' : 'your dealer license'} with the issuing state.</li>
+               <li>We check your website, Google listing or references.</li>
+               <li>We may call <strong>${esc(me.businessName)}</strong> at its publicly listed number to confirm you work there.</li>
+             </ol>
+             <p class="muted">Most reviews take 1–2 business days. You'll get an email at <strong>${esc(me.email)}</strong> as soon as you're approved.${
+               me.emailVerified ? '' : ' Meanwhile, please confirm your email using the link we sent.'
+             }</p>
              <button class="secondary" id="recheck">Check again</button>`
       }
     </div>`;
@@ -1207,8 +1255,12 @@ async function admin(params) {
                 <td>${when(a.lastLoginAt)}</td>
                 <td><div class="row">${
                   role === 'dealer' && a.status === 'pending' && !a.frozen
-                    ? `<button data-approve="${a.id}">Approve</button>`
-                    : ''
+                    ? a.dealer.missingChecks.length
+                      ? `<a class="button secondary small" href="#/admin/account/${a.id}">Verify (${a.dealer.requiredChecks.length - a.dealer.missingChecks.length}/${a.dealer.requiredChecks.length})</a>`
+                      : `<button data-approve="${a.id}">Approve</button>`
+                    : role === 'dealer' && a.dealer.verified
+                      ? verifiedBadge(a.dealer.type)
+                      : ''
                 }<a href="#/admin/account/${a.id}">Details</a></div></td>
               </tr>`,
               )
@@ -1245,7 +1297,7 @@ async function adminAccount(id) {
   const listHref = `#/admin?role=${a.role}${isDealer ? '&status=all' : ''}`;
 
   const actions = [
-    isDealer && a.status !== 'active' && `<button data-patch='{"status":"active"}'>Approve dealer</button>`,
+    isDealer && a.status !== 'active' && !a.dealer.missingChecks.length && `<button data-patch='{"status":"active"}'>Approve dealer</button>`,
     isDealer && a.status === 'pending' && `<button class="secondary" data-patch='{"status":"rejected"}' data-confirm="Reject this dealer? They won't be able to see buyer requests.">Reject</button>`,
     isDealer && a.status === 'active' && `<button class="secondary" data-patch='{"status":"rejected"}' data-confirm="Revoke this dealer's approval? They'll lose access to buyer requests.">Revoke approval</button>`,
     !a.isAdmin && !a.frozen && `<button class="danger" id="freeze">Freeze account</button>`,
@@ -1321,6 +1373,7 @@ async function adminAccount(id) {
       ${a.isAdmin ? '<p class="muted">Admin accounts can\'t be frozen. Admins are set with ADMIN_EMAILS in Render.</p>' : ''}
       <p class="error" id="admin-error"></p>
     </div>
+    ${isDealer ? verificationSection(a) : ''}
     <h2 style="margin-top:24px">${isDealer ? 'Responses' : 'Requests'}</h2>
     ${activity}`;
 
@@ -1350,6 +1403,76 @@ async function adminAccount(id) {
     patch({ frozen: true, reason });
   });
   view.querySelectorAll('tr[data-href]').forEach((tr) => tr.addEventListener('click', () => go(tr.dataset.href)));
+  view.querySelectorAll('[data-check]').forEach((b) =>
+    b.addEventListener('click', () => {
+      if (b.dataset.done === 'false') return patch({ check: b.dataset.check, done: false });
+      const note = prompt(`${CHECK_LABELS[b.dataset.check]}\n\nOptional note (e.g. "License #V123 active, exp. 2027" or "Spoke to Maria at front desk"):`);
+      if (note !== null) patch({ check: b.dataset.check, done: true, note });
+    }),
+  );
+}
+
+const CHECK_LABELS = {
+  license: 'Dealer license looked up with the state',
+  web: 'Website, Google listing or references match',
+  call: 'Called the publicly listed business number and confirmed',
+};
+
+const EMAIL_SIGNAL_LABELS = {
+  match: ['open', 'Email matches their website domain'],
+  free: ['pending', 'Free email provider — check more carefully'],
+  other: ['fulfilled', "Email doesn't match their website"],
+};
+
+// What the dealer told us, quick-lookup links, and the checklist an admin works through before approving.
+function verificationSection(a) {
+  const d = a.dealer;
+  const q = (text) => encodeURIComponent(text);
+  const site = d.website ? (/^https?:\/\//i.test(d.website) ? d.website : `https://${d.website}`) : null;
+  const [signalClass, signalText] = EMAIL_SIGNAL_LABELS[d.emailSignal];
+  const lookups = [
+    site && `<a href="${esc(site)}" target="_blank" rel="noopener">Open website</a>`,
+    `<a href="https://www.google.com/search?q=${q(`"${a.businessName}" ${d.businessAddress ?? ''}`)}" target="_blank" rel="noopener">Google the business</a>`,
+    `<a href="https://www.google.com/maps/search/${q(`${a.businessName} ${d.businessAddress ?? ''}`)}" target="_blank" rel="noopener">Find on Google Maps</a>`,
+    d.licenseState &&
+      `<a href="https://www.google.com/search?q=${q(`${d.licenseState} motor vehicle dealer license lookup`)}" target="_blank" rel="noopener">${esc(d.licenseState)} license lookup</a>`,
+  ].filter(Boolean);
+
+  const rows = ['license', 'web', 'call'].map((key) => {
+    const done = d.checks[key];
+    const required = d.requiredChecks.includes(key);
+    return `
+      <li class="check ${done ? 'done' : ''}">
+        <span class="check-box">${done ? '✓' : ''}</span>
+        <div>
+          <strong>${CHECK_LABELS[key]}</strong>${required ? '' : ' <span class="muted">(optional for brokers without a license)</span>'}
+          ${done ? `<div class="muted">${esc(done.by)} · ${ago(done.at.replace('T', ' ').slice(0, 19))}${done.note ? ` — “${esc(done.note)}”` : ''}</div>` : ''}
+          ${key === 'call' && !done ? '<div class="muted">Call the number on their website or Google listing, not the one they typed in.</div>' : ''}
+        </div>
+        <button class="secondary small" data-check="${key}" data-done="${done ? 'false' : 'true'}">${done ? 'Undo' : 'Mark done'}</button>
+      </li>`;
+  });
+
+  return `
+    <div class="card" style="margin-top:16px">
+      <div class="row spread">
+        <h2 style="margin:0">Verification</h2>
+        ${d.verified ? verifiedBadge(d.type) : `<span class="muted">${d.missingChecks.length ? `${d.requiredChecks.length - d.missingChecks.length} of ${d.requiredChecks.length} required checks done` : 'Checks complete — ready to approve'}</span>`}
+      </div>
+      <dl class="facts">
+        <dt>Applied as</dt><dd>${d.type === 'broker' ? 'Broker / independent specialist' : 'Licensed dealer'}</dd>
+        <dt>Their role</dt><dd>${esc(d.jobTitle ?? '—')}</dd>
+        <dt>Email check</dt><dd><span class="pill ${signalClass}">${signalText}</span></dd>
+        <dt>Business phone</dt><dd>${a.phone ? esc(a.phone) : '—'} <span class="muted">(as entered — verify independently)</span></dd>
+        <dt>Address</dt><dd>${esc(d.businessAddress ?? '—')}</dd>
+        <dt>Website</dt><dd>${site ? `<a href="${esc(site)}" target="_blank" rel="noopener">${esc(d.website)}</a>` : '—'}</dd>
+        <dt>License</dt><dd>${d.licenseNumber ? `${esc(d.licenseNumber)} · ${esc(d.licenseState)}` : '—'}</dd>
+        ${d.experience ? `<dt>Track record</dt><dd style="white-space:pre-wrap">${esc(d.experience)}</dd>` : ''}
+      </dl>
+      <p class="row lookups">${lookups.join('')}</p>
+      <ul class="checklist">${rows.join('')}</ul>
+      ${a.status !== 'active' && d.missingChecks.length ? '<p class="muted">The Approve button appears once the required checks are done.</p>' : ''}
+    </div>`;
 }
 
 // ---------- router ----------
