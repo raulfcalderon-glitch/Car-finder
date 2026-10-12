@@ -2,6 +2,7 @@
 // Contact details below are the operator's; update them in one place here if they change.
 
 export const LEGAL_UPDATED = 'October 12, 2026';
+export const CONTACT_EMAIL = 'raulfcalderon@gmail.com';
 
 export const TERMS_HTML = `
 <p class="legal-draft">Draft — pending legal review.</p>

@@ -118,6 +118,17 @@ const SCHEMA = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_dealer_reports_dealer ON dealer_reports(dealer_id, status);
+
+  -- Messages sent through the Contact us page (also emailed to admins).
+  CREATE TABLE IF NOT EXISTS contact_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+    name       TEXT NOT NULL,
+    email      TEXT NOT NULL,
+    topic      TEXT NOT NULL,
+    message    TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `;
 
 // What dealers are allowed to see: no hidden requests and nothing from frozen accounts.

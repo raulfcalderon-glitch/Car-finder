@@ -230,9 +230,7 @@ fieldset.stack .makes-field input { width: 100%; }
 .spec-card {
   background: var(--ink-2); border: 1px solid var(--ink-border); border-radius: 14px; padding: 16px 18px;
   box-shadow: 0 18px 40px rgba(0, 0, 0, .35);
-  transform: translateX(calc(var(--i) * 18px));
 }
-@media (max-width: 860px) { .spec-card { transform: none; } }
 .spec-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .spec-label { font-size: .7rem; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
 .spec-budget { font-size: .85rem; color: var(--ink-muted); }
@@ -332,3 +330,64 @@ fieldset.stack .makes-field input { width: 100%; }
 .card.report.open { border-left: 3px solid var(--accent); }
 .quoted { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--border); color: var(--muted); white-space: pre-wrap; }
 .card.stat.alert .stat-n { color: var(--accent); }
+
+/* ---------- homepage motion ---------- */
+.hero-band { position: relative; isolation: isolate; }
+.hero-band::before {
+  content: ""; position: absolute; z-index: -1; width: 900px; height: 600px; right: -200px; top: -300px;
+  background: radial-gradient(closest-side, rgba(226, 40, 63, .28), transparent);
+  animation: glow-drift 16s ease-in-out infinite alternate;
+}
+@keyframes glow-drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(-260px, 120px) scale(1.15); } }
+
+.hero-copy > * { animation: fade-up .8s cubic-bezier(.2, .7, .2, 1) both; }
+.hero-copy > :nth-child(2) { animation-delay: .1s; }
+.hero-copy > :nth-child(3) { animation-delay: .22s; }
+.hero-copy > :nth-child(4) { animation-delay: .34s; }
+@keyframes fade-up { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+/* example cards: static offset uses `translate` so `transform` is free for the animations */
+.spec-card { translate: calc(var(--i) * 18px) 0; animation: card-in .9s cubic-bezier(.2, .7, .2, 1) calc(.35s + var(--i) * .18s) both, card-float 7s ease-in-out calc(1.4s + var(--i) * .9s) infinite; }
+@media (max-width: 860px) { .spec-card { translate: none; } }
+@keyframes card-in { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes card-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+.spec-label { display: inline-flex; align-items: center; gap: 7px; }
+.spec-label::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: live-pulse 2s ease-out infinite; }
+@keyframes live-pulse { 0% { box-shadow: 0 0 0 0 rgba(226, 40, 63, .6); } 80%, 100% { box-shadow: 0 0 0 7px rgba(226, 40, 63, 0); } }
+.spec-card:hover { border-color: rgba(226, 40, 63, .45); }
+
+.reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s ease, transform .7s cubic-bezier(.2, .7, .2, 1); transition-delay: calc(var(--d, 0) * .12s); }
+.reveal.in { opacity: 1; transform: none; }
+.step.in .step-n { animation: pop .5s cubic-bezier(.3, 1.6, .5, 1) calc(var(--d, 0) * .12s + .2s) both; }
+@keyframes pop { from { transform: scale(.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.step, .audience { transition: opacity .7s ease, transform .7s cubic-bezier(.2, .7, .2, 1), border-color .2s, box-shadow .2s; }
+.step.in:hover, .audience.in:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(0, 0, 0, .08); border-color: rgba(200, 16, 46, .35); }
+.button { transition: transform .15s ease, box-shadow .15s ease, background-color .15s; }
+.button.big:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(200, 16, 46, .28); }
+
+/* closing quick-start band */
+.cta-band .lede { margin: 0 auto 22px; }
+.quickstart { display: flex; gap: 10px; max-width: 620px; margin: 0 auto; }
+.quickstart input {
+  flex: 1; padding: 14px 16px; font-size: 1.05rem; border-radius: 10px;
+  background: var(--ink-2); color: var(--ink-text); border: 1px solid var(--ink-border);
+}
+.quickstart input::placeholder { color: var(--ink-muted); }
+.quickstart input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 560px) { .quickstart { flex-direction: column; } }
+.quickstart-note { margin: 14px 0 0; font-size: .85rem; color: var(--ink-muted); }
+.prefill-note { border-left: 3px solid var(--accent); background: var(--bg); padding: 8px 12px; border-radius: 6px; font-size: .92rem; }
+
+/* contact page */
+.contact-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; align-items: start; }
+.contact-layout .card + .card { margin-top: 0; }
+@media (max-width: 800px) { .contact-layout { grid-template-columns: 1fr; } }
+.contact-side h2 { font-size: 1.1rem; }
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+/* Less motion for people who ask for it. */
+@media (prefers-reduced-motion: reduce) {
+  .hero-band::before, .hero-copy > *, .spec-card, .spec-label::before, .step.in .step-n { animation: none !important; }
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .button.big:hover, .step.in:hover, .audience.in:hover { transform: none; }
+}

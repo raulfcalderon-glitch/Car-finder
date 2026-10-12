@@ -10,6 +10,7 @@ A two-sided marketplace for enthusiast cars — 911s, BMW M cars, special editio
 - **Photos:** dealers can attach up to 6 photos to a response. The browser shrinks them (max 1600px JPEG) before upload; the server checks they're real JPEG/PNG/WebP files and stores them in `uploads/` next to the database (so on the persistent disk). Buyers see them on the request and in the response email.
 - **Profiles:** everyone can upload a profile picture (center-cropped to a square in the browser); without one, a colored circle shows up to two initials (business name for dealers). Dealers' pictures show on their responses, buyers' on their requests.
 - **Reports:** buyers can report a dealer's response (deposit/wire request, misleading, conduct, spam, other) once per response; admins get an email and a **Reports** tab to review and resolve, and each dealer's page lists its reports.
+- **Homepage:** animated hero, example request cards, a live ticker of recent requests, scroll-in sections, and a quick-start box ("What are you hunting for?") that pre-fills the request form (through signup for visitors). Motion is turned off for reduced-motion users. A **Contact us** page sends messages to admins.
 - Buyers get an **email alert** when a dealer responds, and see each response with the dealer's contact details. Dealers only see a buyer's first name and only their own responses, not competitors'.
 
 ## Run it
@@ -56,6 +57,7 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 | --- | --- | --- | --- |
 | POST | `/api/signup`, `/api/login`, `/api/logout` | anyone | Accounts (`role` is `user` or `dealer`; signup needs `acceptTerms: true`) |
 | GET | `/api/me` | anyone | Current account |
+| POST | `/api/contact` | anyone | Contact form: `name`, `email`, `topic`, `message`; stored in `contact_messages` and emailed to admins (honeypot + 5/hour per address) |
 | GET | `/api/public/recent-requests` | anyone | Homepage ticker: year, make, model and trim of the 10 latest open, visible requests (nothing else) |
 | PUT | `/api/me/alerts` | dealer | Alert settings: `mode` (`all`, `makes`, `off`), `makes` (list or comma-separated), `minBudget` |
 | PUT / DELETE | `/api/me/avatar` | signed in | Set (`photo` as an image data URL) or remove your profile picture |

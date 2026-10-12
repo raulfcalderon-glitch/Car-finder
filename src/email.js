@@ -232,3 +232,26 @@ export function dealerReportEmail({ to, report, dealer, reporter, request, respo
       <p style="color:#5f6b7a;font-size:13px">You can freeze the dealer from their page if needed.<br>— CarsFindMe</p>`),
   };
 }
+
+// A message from the Contact us page, sent to admins. Replying goes straight to the sender.
+export function contactEmail({ to, name, email, topicLabel, message, account, appUrl }) {
+  const who = account ? `${name} (${email}) — signed in as a ${account.role === 'dealer' ? 'dealer' : 'buyer'}` : `${name} (${email})`;
+  return {
+    to,
+    replyTo: email,
+    subject: `Contact form: ${topicLabel} — ${name}`,
+    text:
+      `New message from the CarsFindMe contact page.\n\nFrom: ${who}\nTopic: ${topicLabel}\n\n${message}\n\n` +
+      `Reply to this email to answer them directly.${account ? `\nTheir account: ${appUrl}/#/admin/account/${account.id}` : ''}\n— CarsFindMe`,
+    html: wrap(`
+      <p>New message from the CarsFindMe contact page.</p>
+      <table style="border-collapse:collapse;margin:12px 0">
+        <tr><td style="color:#5f6b7a;padding:2px 16px 2px 0">From</td><td>${esc(who)}</td></tr>
+        <tr><td style="color:#5f6b7a;padding:2px 16px 2px 0">Topic</td><td>${esc(topicLabel)}</td></tr>
+      </table>
+      <blockquote style="margin:0 0 12px;padding:8px 14px;border-left:3px solid #c8102e;background:#f6f7f9;white-space:pre-wrap">${esc(message)}</blockquote>
+      <p style="color:#5f6b7a;font-size:13px">Reply to this email to answer them directly.${
+        account ? `<br><a href="${esc(`${appUrl}/#/admin/account/${account.id}`)}">View their account</a>` : ''
+      }<br>— CarsFindMe</p>`),
+  };
+}

@@ -12,6 +12,7 @@ import {
   passwordResetEmail,
   newRequestAlertEmail,
   dealerReportEmail,
+  contactEmail,
 } from './email.js';
 import { createLimiter } from './ratelimit.js';
 import {
@@ -349,6 +350,15 @@ const ACCOUNT_COUNTS = `
 
 const MINUTE = 60_000;
 
+export const CONTACT_TOPICS = {
+  general: 'General question',
+  account: 'Help with my account',
+  dealer: 'Becoming a dealer',
+  problem: 'Report a problem',
+  partnership: 'Partnerships or press',
+  other: 'Something else',
+};
+
 export const REPORT_REASONS = {
   deposit: 'Asked for a deposit, wire or payment up front',
   misleading: 'Misleading or fake car or details',
@@ -364,6 +374,7 @@ const DEFAULT_LIMITS = {
   emailPerAccount: { max: 3, windowMs: 60 * MINUTE }, // reset / verification emails per address
   emailPerIp: { max: 20, windowMs: 60 * MINUTE },
   signupPerIp: { max: 20, windowMs: 60 * MINUTE },
+  contactPerIp: { max: 5, windowMs: 60 * MINUTE },
 };
 
 function clientIp(req) {
@@ -494,6 +505,9 @@ export function createApp(
         website = :website, license_number = :license_number, license_state = :license_state, experience = :experience
       WHERE id = :id`),
     setChecks: db.prepare('UPDATE accounts SET verification_checks = ? WHERE id = ?'),
+    insertContact: db.prepare(
+      'INSERT INTO contact_messages (account_id, name, email, topic, message) VALUES (?, ?, ?, ?, ?)',
+    ),
     insertReport: db.prepare(
       'INSERT INTO dealer_reports (response_id, dealer_id, reporter_id, reason, details) VALUES (?, ?, ?, ?, ?)',
     ),
@@ -1033,6 +1047,27 @@ export function createApp(
       const { changes } = token ? q.unsubscribeAlerts.run(String(token)) : { changes: 0 };
       if (!changes) throw new HttpError(400, 'This unsubscribe link is invalid. You can change alerts from your account instead.');
       sendJson(res, 200, { ok: true });
+    }],
+
+    ['POST', /^\/api\/contact$/, async (req, res) => {
+      const body = await readJson(req);
+      // Bots fill in every field, including this one that people never see.
+      if (body.website) return sendJson(res, 200, { ok: true });
+      const account = currentAccount(req);
+      const name = str(body.name, 'Name', { required: true, max: 100 });
+      const email = str(body.email, 'Email', { required: true, max: 200 }).toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'Enter a valid email address');
+      const topic = oneOf(body.topic, 'Topic', Object.keys(CONTACT_TOPICS), null);
+      if (!topic) throw new HttpError(400, 'Choose a topic');
+      const message = str(body.message, 'Message', { required: true, max: 5000 });
+      if (message.length < 10) throw new HttpError(400, 'Please write a little more so we can help');
+      throttle([['contactPerIp', clientIp(req)]]);
+
+      q.insertContact.run(account?.id ?? null, name, email, topic, message);
+      sendJson(res, 201, { ok: true });
+      for (const to of admins) {
+        notify(contactEmail({ to, name, email, topicLabel: CONTACT_TOPICS[topic], message, account, appUrl }));
+      }
     }],
 
     ['GET', /^\/api\/public\/recent-requests$/, async (req, res) => {

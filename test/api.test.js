@@ -976,3 +976,40 @@ test('the homepage ticker shows only vehicle basics of recent visible requests',
   await buyer('PATCH', `/api/requests/${body.request.id}`, { status: 'fulfilled' });
   assert.ok(!(await client()('GET', '/api/public/recent-requests')).body.requests.some((r) => r.model === 'Stratos'), 'only open requests');
 });
+
+test('the contact form emails admins, stores the message and resists spam', async () => {
+  const send = (call, body) => call('POST', '/api/contact', body);
+  const valid = { name: 'Casey Contact', email: 'casey@example.com', topic: 'general', message: 'Do you cover cars in Canada too?' };
+  const visitor = client();
+
+  assert.match((await send(visitor, { ...valid, topic: 'nope' })).body.error, /Topic/);
+  assert.match((await send(visitor, { ...valid, email: 'not-an-email' })).body.error, /valid email/);
+  assert.match((await send(visitor, { ...valid, message: 'hi' })).body.error, /a little more/);
+  assert.match((await send(visitor, { ...valid, name: '' })).body.error, /Name/);
+
+  sentEmails.length = 0;
+  assert.equal((await send(visitor, valid)).status, 201);
+  await tick();
+  const email = sentEmails.find((e) => e.to === 'admin@test.com');
+  assert.equal(email.subject, 'Contact form: General question — Casey Contact');
+  assert.equal(email.replyTo, 'casey@example.com');
+  assert.match(email.text, /Canada/);
+  assert.equal(testDb.prepare("SELECT COUNT(*) AS n FROM contact_messages WHERE email = 'casey@example.com'").get().n, 1);
+
+  // Signed-in senders are linked to their account.
+  const buyer = await signup('user', { name: 'Signed In' });
+  sentEmails.length = 0;
+  await send(buyer, { ...valid, name: 'Signed In', email: buyer.account.email, topic: 'account' });
+  await tick();
+  assert.match(sentEmails.find((e) => e.to === 'admin@test.com').text, new RegExp(`/#/admin/account/${buyer.account.id}`));
+
+  // The hidden honeypot field silently drops bot submissions.
+  sentEmails.length = 0;
+  assert.equal((await send(visitor, { ...valid, website: 'http://spam.example' })).status, 200);
+  await tick();
+  assert.equal(sentEmails.length, 0);
+
+  // And there's a per-address limit (5 an hour); 2 real ones were sent above.
+  for (let i = 0; i < 3; i++) assert.equal((await send(visitor, valid)).status, 201);
+  assert.equal((await send(visitor, valid)).status, 429);
+});

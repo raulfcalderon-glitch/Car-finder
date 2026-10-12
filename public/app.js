@@ -1,4 +1,4 @@
-import { TERMS_HTML, PRIVACY_HTML, LEGAL_UPDATED } from './legal.js';
+import { TERMS_HTML, PRIVACY_HTML, LEGAL_UPDATED, CONTACT_EMAIL } from './legal.js';
 
 const view = document.getElementById('view');
 const banner = document.getElementById('banner');
@@ -149,6 +149,7 @@ function renderNav() {
         <div class="menu-links menu-mobile">${links}</div>
         <a href="#/profile" role="menuitem">Profile &amp; photo</a>
         <a href="#/" role="menuitem">Home</a>
+        <a href="#/contact" role="menuitem">Contact us</a>
         <button type="button" id="logout" role="menuitem">Log out</button>
       </div>
     </div>`;
@@ -282,7 +283,7 @@ function landingLinks() {
   }
   if (me.role === 'dealer') {
     const browse = ['#/browse', 'Browse requests'];
-    return { primary: browse, secondary: ['#/alerts', 'Alert settings'], buyer: null, dealer: browse, closing: browse };
+    return { primary: browse, secondary: ['#/alerts', 'Alert settings'], buyer: null, dealer: ['#/alerts', 'Set up alerts'], closing: browse };
   }
   const post = ['#/new', 'Post a new request'];
   return { primary: post, secondary: ['#/my', 'My requests'], buyer: post, dealer: ['#/signup?role=dealer', 'Become a Dealer'], closing: post };
@@ -320,16 +321,16 @@ function landing() {
     </section>
 
     <section class="section">
-      <h2 class="section-title">How it works</h2>
+      <h2 class="section-title reveal">How it works</h2>
       <div class="steps">
-        <div class="step"><span class="step-n">1</span><h3>Post the exact spec</h3><p class="muted">Years, trim, gearbox, color, mileage, budget, must-haves. The more specific, the better the matches.</p></div>
-        <div class="step"><span class="step-n">2</span><h3>Specialists see it</h3><p class="muted">Only dealers we've reviewed can see requests, and they get an alert the moment yours matches what they sell.</p></div>
-        <div class="step"><span class="step-n">3</span><h3>Compare offers, deal direct</h3><p class="muted">Get offers with prices and photos by email. Reach out to the dealers you like — no middleman, no fees.</p></div>
+        <div class="step reveal" style="--d:0"><span class="step-n">1</span><h3>Post the exact spec</h3><p class="muted">Years, trim, gearbox, color, mileage, budget, must-haves. The more specific, the better the matches.</p></div>
+        <div class="step reveal" style="--d:1"><span class="step-n">2</span><h3>Specialists see it</h3><p class="muted">Only dealers we've reviewed can see requests, and they get an alert the moment yours matches what they sell.</p></div>
+        <div class="step reveal" style="--d:2"><span class="step-n">3</span><h3>Compare offers, deal direct</h3><p class="muted">Get offers with prices and photos by email. Reach out to the dealers you like — no middleman, no fees.</p></div>
       </div>
     </section>
 
     <section class="section audiences">
-      <div class="card audience">
+      <div class="card audience reveal" style="--d:0">
         <h2>For enthusiasts</h2>
         <ul class="checks">
           <li>Stop refreshing listings — let the cars come to you</li>
@@ -338,7 +339,7 @@ function landing() {
         </ul>
         ${button(links.buyer)}
       </div>
-      <div class="card audience">
+      <div class="card audience reveal" style="--d:1">
         <h2>For specialty dealers</h2>
         <ul class="checks">
           <li>See exactly what serious buyers want, right now</li>
@@ -349,12 +350,165 @@ function landing() {
       </div>
     </section>
 
-    <section class="cta-band">
-      <h2>What are you hunting for?</h2>
-      ${button(links.closing, 'big')}
-    </section>`;
+    ${
+      me?.role === 'dealer'
+        ? `<section class="cta-band">
+            <h2 class="reveal">See what enthusiasts want right now</h2>
+            <div class="reveal" style="--d:1">${button(links.closing, 'big')}</div>
+          </section>`
+        : `<section class="cta-band">
+            <h2 class="reveal">What are you hunting for?</h2>
+            <p class="lede reveal" style="--d:1">Type the car and we'll start your request.</p>
+            <form class="quickstart reveal" style="--d:2" id="quickstart">
+              <input name="car" autocomplete="off" aria-label="The car you're looking for" placeholder="1995 Porsche 993 Carrera">
+              <button type="submit" class="button big">Start my request</button>
+            </form>
+            <p class="quickstart-note reveal" style="--d:3">Free for enthusiasts · Only verified dealers see your request</p>
+          </section>`
+    }`;
   loadTicker();
+  revealOnScroll();
+  bindQuickStart();
 }
+
+// Sections fade up as they scroll into view.
+function revealOnScroll() {
+  const items = view.querySelectorAll('.reveal');
+  if (!('IntersectionObserver' in window)) return items.forEach((el) => el.classList.add('in'));
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('in');
+          observer.unobserve(entry.target);
+        }
+      }
+    },
+    { threshold: 0.15 },
+  );
+  items.forEach((el) => observer.observe(el));
+}
+
+const QUICKSTART_KEY = 'carsfindme:quickstart';
+const QUICKSTART_EXAMPLES = [
+  '1995 Porsche 993 Carrera',
+  '2004 BMW M3 CSL',
+  '1992 Lancia Delta Integrale Evo',
+  '1967 Jaguar E-Type Series 1',
+  '2011 Lexus LFA',
+  '1994 Toyota Supra Turbo',
+  '1989 Ferrari 328 GTS',
+];
+
+// "1995 Porsche 993 Carrera" → year 1995, make Porsche, model 993 Carrera. The buyer reviews it on the form.
+function parseCarText(text) {
+  const clean = String(text).trim().replace(/\s+/g, ' ');
+  const match = clean.match(/\b(18[89]\d|19\d\d|20\d\d)\b/);
+  const year = match ? Number(match[1]) : null;
+  const rest = match ? `${clean.slice(0, match.index)} ${clean.slice(match.index + 4)}`.trim().replace(/\s+/g, ' ') : clean;
+  const [make = '', ...model] = rest.split(' ');
+  return { make, model: model.join(' '), yearMin: year, yearMax: year };
+}
+
+function storage(action, value) {
+  try {
+    if (action === 'set') sessionStorage.setItem(QUICKSTART_KEY, value);
+    else if (action === 'take') {
+      const v = sessionStorage.getItem(QUICKSTART_KEY);
+      sessionStorage.removeItem(QUICKSTART_KEY);
+      return v;
+    } else return sessionStorage.getItem(QUICKSTART_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function bindQuickStart() {
+  const form = view.querySelector('#quickstart');
+  if (!form) return;
+  const input = form.car;
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = input.value.trim() || input.placeholder;
+    storage('set', text);
+    go(me ? '#/new' : '#/signup?role=user');
+  });
+  typePlaceholder(input);
+}
+
+// Types example cars into the quick-start box, one after another, until the visitor starts typing.
+function typePlaceholder(input) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let example = 0;
+  let chars = 0;
+  let deleting = false;
+  const tick = () => {
+    if (!input.isConnected) return; // left the homepage
+    if (document.activeElement !== input && !input.value) {
+      const word = QUICKSTART_EXAMPLES[example];
+      chars += deleting ? -1 : 1;
+      input.placeholder = word.slice(0, chars) || ' ';
+      if (!deleting && chars === word.length) {
+        deleting = true;
+        return setTimeout(tick, 1800);
+      }
+      if (deleting && chars === 0) {
+        deleting = false;
+        example = (example + 1) % QUICKSTART_EXAMPLES.length;
+      }
+    }
+    setTimeout(tick, deleting ? 35 : 75);
+  };
+  tick();
+}
+
+function contactPage() {
+  view.innerHTML = `
+    <div class="contact-layout">
+      <div class="card">
+        <h1>Contact us</h1>
+        <p class="muted">Questions, feedback, help with your account, or interested in partnering? Send us a message and we'll get back to you, usually within 1–2 business days.</p>
+        <form id="contact-form">
+          <div class="grid-2">
+            <label>Your name <input name="name" autocomplete="name" required value="${esc(me?.name ?? '')}"></label>
+            <label>Email <input name="email" type="email" autocomplete="email" required value="${esc(me?.email ?? '')}"></label>
+          </div>
+          <label>Topic
+            <select name="topic" required>
+              <option value="">Choose a topic…</option>
+              ${Object.entries(CONTACT_TOPICS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+            </select>
+          </label>
+          <label>Message <textarea name="message" rows="6" required minlength="10"></textarea></label>
+          <label class="hp" aria-hidden="true">Leave this empty <input name="website" tabindex="-1" autocomplete="off"></label>
+          <p class="error"></p>
+          <button type="submit">Send message</button>
+        </form>
+      </div>
+      <aside class="card contact-side">
+        <h2>Other ways to reach us</h2>
+        <p>Email: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a></p>
+        <p class="muted">Reporting a dealer? Use <strong>Report this dealer</strong> on their offer, so we have the details we need.</p>
+        <p class="muted">Applying as a dealer? See how we verify dealers on the <a href="#/signup?role=dealer">dealer signup page</a>.</p>
+      </aside>
+    </div>`;
+  bindForm(view.querySelector('#contact-form'), async (data) => {
+    await api('/api/contact', { method: 'POST', body: data });
+    view.querySelector('.contact-layout .card').innerHTML = `
+      <h1>Thanks, ${esc(data.name.split(' ')[0])}!</h1>
+      <p>Your message is on its way. We'll reply to <strong>${esc(data.email)}</strong>, usually within 1–2 business days.</p>
+      <a class="button" href="#/">Back to home</a>`;
+  });
+}
+
+const CONTACT_TOPICS = {
+  general: 'General question',
+  account: 'Help with my account',
+  dealer: 'Becoming a dealer',
+  problem: 'Report a problem',
+  partnership: 'Partnerships or press',
+  other: 'Something else',
+};
 
 function login() {
   view.innerHTML = `
@@ -371,7 +525,7 @@ function login() {
     </div>`;
   bindForm(view.querySelector('form'), async (data) => {
     me = (await api('/api/login', { method: 'POST', body: data })).account;
-    go(home());
+    go(me.role === 'user' && storage('peek') ? '#/new' : home());
   });
 }
 
@@ -462,7 +616,7 @@ function signup(params) {
     const body = { ...data, acceptTerms: data.acceptTerms === 'on' };
     if (body.role !== 'dealer') for (const k of ['dealerType', 'jobTitle', 'website', 'businessAddress', 'licenseNumber', 'licenseState', 'experience']) delete body[k];
     me = (await api('/api/signup', { method: 'POST', body })).account;
-    go(home());
+    go(me.role === 'user' && storage('peek') ? '#/new' : home());
   });
 }
 
@@ -627,7 +781,7 @@ function renderBanner() {
 }
 
 // The vehicle request form, used by buyers to post and by admins to edit.
-function requestForm({ initial = {}, edit = null } = {}) {
+function requestForm({ initial = {}, edit = null, prefilled = false } = {}) {
   const thisYear = new Date().getFullYear();
   const v = (k) => `value="${esc(initial[k] ?? '')}"`;
   view.innerHTML = `
@@ -636,7 +790,8 @@ function requestForm({ initial = {}, edit = null } = {}) {
         edit
           ? `<h1>Edit request</h1><p class="muted">Editing as admin. Changes are visible to the buyer and dealers right away.</p>`
           : `<h1>What are you hunting for?</h1>
-             <p class="muted">The more specific, the better — options, gearbox, paint, mileage, provenance. Dealers see everything here except your contact details.</p>`
+             <p class="muted">The more specific, the better — options, gearbox, paint, mileage, provenance. Dealers see everything here except your contact details.</p>
+             ${prefilled ? '<p class="prefill-note">We started this from what you typed — check the make, model and year, then add the details.</p>' : ''}`
       }
       <form>
         <div class="grid-2">
@@ -667,6 +822,7 @@ function requestForm({ initial = {}, edit = null } = {}) {
       return go(edit.cancelHref);
     }
     const { request } = await api('/api/requests', { method: 'POST', body: data });
+    storage('take');
     go(`#/request/${request.id}`);
   });
 }
@@ -700,6 +856,12 @@ async function loadTicker() {
       </div>
     </div>`;
   ticker.hidden = false;
+}
+
+// The buyer's new-request form, prefilled from the homepage quick-start box when they came from there.
+function newRequestPage() {
+  const text = storage('peek'); // kept until the request is posted, in case they confirm their email first
+  requestForm({ initial: text ? parseCarText(text) : {}, prefilled: Boolean(text) });
 }
 
 async function adminEditRequest(id) {
@@ -1635,6 +1797,7 @@ async function render() {
     '/reset': resetPassword,
     '/unsubscribe': unsubscribePage,
     '/signup': signup,
+    '/contact': contactPage,
   };
   if (path in openRoutes) return openRoutes[path](params);
 
@@ -1660,7 +1823,7 @@ async function render() {
     const detail = path.match(/^\/request\/(\d+)$/);
     if (detail) return await requestDetail(detail[1]);
     if (me.role === 'user' && path === '/my') return await myRequests();
-    if (me.role === 'user' && path === '/new') return requestForm();
+    if (me.role === 'user' && path === '/new') return newRequestPage();
     if (me.role === 'dealer' && path === '/browse') return await browse(params);
     go(home());
   } catch (err) {
