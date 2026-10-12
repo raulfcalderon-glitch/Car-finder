@@ -107,17 +107,17 @@ function renderNav() {
 function landing() {
   view.innerHTML = `
     <section class="hero">
-      <h1>Tell dealers exactly what you're looking for.</h1>
-      <p>Post a request for the car you want — say, a 1987 Porsche 911 Carrera — and specialty dealers who can source it will come to you.</p>
+      <h1>Tell us the car. The right dealers find it.</h1>
+      <p>For 911s, M cars, special editions and the ones you've been chasing for years. Post the exact spec you want — a 1987 Carrera in Guards Red, a 6&#8209;speed E46 M3 in Laguna Seca Blue, a GT3 Touring — and vetted specialty dealers come to you.</p>
       <div class="split">
         <div class="card">
-          <h2>I'm looking for a car</h2>
-          <p class="muted">Describe the make, model, years, budget, and condition. Get replies from dealers who have it or can find it.</p>
+          <h2>I'm hunting for a car</h2>
+          <p class="muted">Describe the spec down to the gearbox and paint. Get offers from specialists who have it or can source it.</p>
           <a class="button" href="#/signup?role=user">Post a request</a>
         </div>
         <div class="card">
-          <h2>I'm a dealer</h2>
-          <p class="muted">Search and sort live buyer requests. Respond with what you have and a price.</p>
+          <h2>I'm a specialty dealer</h2>
+          <p class="muted">See what serious enthusiasts are looking for right now. Respond with what you have and a price.</p>
           <a class="button" href="#/signup?role=dealer">Browse requests</a>
         </div>
       </div>
@@ -180,15 +180,15 @@ function requestForm() {
   const thisYear = new Date().getFullYear();
   view.innerHTML = `
     <div class="card" style="max-width:720px;margin:0 auto">
-      <h1>What are you looking for?</h1>
-      <p class="muted">Be as specific as you like. Dealers will see everything here except your contact details.</p>
+      <h1>What are you hunting for?</h1>
+      <p class="muted">The more specific, the better — options, gearbox, paint, mileage, provenance. Dealers see everything here except your contact details.</p>
       <form>
         <div class="grid-2">
           <label>Make <input name="make" placeholder="Porsche" required></label>
           <label>Model <input name="model" placeholder="911 Carrera" required></label>
           <label>Year from <input name="yearMin" type="number" min="1885" max="${thisYear + 2}" placeholder="1987"></label>
           <label>Year to <input name="yearMax" type="number" min="1885" max="${thisYear + 2}" placeholder="1987"></label>
-          <label>Trim / variant <input name="trim" placeholder="Targa, G50 gearbox"></label>
+          <label>Trim / variant <input name="trim" placeholder="Targa, G50 gearbox, Sport Seats"></label>
           <label>Color <input name="color" placeholder="Guards Red"></label>
           <label>Max budget (USD) <input name="maxBudget" type="number" min="0" step="500" placeholder="85000"></label>
           <label>Condition
@@ -435,7 +435,7 @@ function dealerNotApproved() {
       <h1>${rejected ? 'Account not approved' : 'Thanks for signing up!'}</h1>
       ${
         rejected
-          ? `<p class="muted">Your dealer account for ${esc(me.businessName)} wasn't approved. If you think this is a mistake, reply to any Car Finder email or contact us.</p>`
+          ? `<p class="muted">Your dealer account for ${esc(me.businessName)} wasn't approved. If you think this is a mistake, reply to any CarsFindMe email or contact us.</p>`
           : `<p>We review every dealer before they can see buyer requests, to keep buyers' information safe.</p>
              <p class="muted">You'll get an email at <strong>${esc(me.email)}</strong> as soon as <strong>${esc(me.businessName)}</strong> is approved.</p>
              <button class="secondary" id="recheck">Check again</button>`

@@ -44,7 +44,7 @@ export function newResponseEmail({ request, response, dealer, buyer, appUrl }) {
       `${price}"${response.message}"\n\n` +
       `Contact: ${contact}\n\n` +
       `See all responses: ${link}\n\n` +
-      `You can reply to this email to reach the dealer directly.\n— Car Finder`,
+      `You can reply to this email to reach the dealer directly.\n— CarsFindMe`,
     html: `
       <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;color:#1b1f24;line-height:1.5">
         <p>Hi ${esc(buyer.name.split(/\s+/)[0])},</p>
@@ -53,7 +53,7 @@ export function newResponseEmail({ request, response, dealer, buyer, appUrl }) {
         <blockquote style="margin:0;padding:8px 14px;border-left:3px solid #b3261e;background:#f6f7f9;white-space:pre-wrap">${esc(response.message)}</blockquote>
         <p style="color:#5f6b7a">Contact: ${esc(contact)}</p>
         <p>${button(link, 'See all responses')}</p>
-        <p style="color:#5f6b7a;font-size:13px">You can reply to this email to reach the dealer directly.<br>— Car Finder</p>
+        <p style="color:#5f6b7a;font-size:13px">You can reply to this email to reach the dealer directly.<br>— CarsFindMe</p>
       </div>`,
   };
 }
@@ -79,11 +79,11 @@ export function newDealerEmail({ dealer, to, appUrl }) {
     replyTo: dealer.email,
     subject: `New dealer waiting for approval: ${dealer.business_name || dealer.name}`,
     text:
-      `A new dealer signed up for Car Finder and is waiting for approval.\n\n` +
+      `A new dealer signed up for CarsFindMe and is waiting for approval.\n\n` +
       details.map(([k, v]) => `${k}: ${v}`).join('\n') +
-      `\n\nReview and approve: ${link}\n— Car Finder`,
+      `\n\nReview and approve: ${link}\n— CarsFindMe`,
     html: wrap(`
-      <p>A new dealer signed up for Car Finder and is waiting for approval.</p>
+      <p>A new dealer signed up for CarsFindMe and is waiting for approval.</p>
       <table style="border-collapse:collapse;margin:12px 0">${details
         .map(([k, v]) => `<tr><td style="color:#5f6b7a;padding:2px 16px 2px 0">${esc(k)}</td><td>${esc(v)}</td></tr>`)
         .join('')}</table>
@@ -96,17 +96,17 @@ export function dealerApprovedEmail({ dealer, appUrl }) {
   const link = `${appUrl}/#/browse`;
   return {
     to: dealer.email,
-    subject: 'Your Car Finder dealer account is approved',
+    subject: 'Your CarsFindMe dealer account is approved',
     text:
       `Hi ${dealer.name.split(/\s+/)[0]},\n\n` +
       `Your dealer account${dealer.business_name ? ` for ${dealer.business_name}` : ''} has been approved. ` +
       `You can now browse buyer requests and respond with what you have.\n\n` +
-      `Browse requests: ${link}\n— Car Finder`,
+      `Browse requests: ${link}\n— CarsFindMe`,
     html: wrap(`
       <p>Hi ${esc(dealer.name.split(/\s+/)[0])},</p>
       <p>Your dealer account${dealer.business_name ? ` for <strong>${esc(dealer.business_name)}</strong>` : ''} has been approved.
         You can now browse buyer requests and respond with what you have.</p>
       <p>${button(link, 'Browse requests')}</p>
-      <p style="color:#5f6b7a;font-size:13px">— Car Finder</p>`),
+      <p style="color:#5f6b7a;font-size:13px">— CarsFindMe</p>`),
   };
 }

@@ -25,10 +25,10 @@ const app = createApp(db, {
   appUrl: (process.env.APP_URL ?? process.env.RENDER_EXTERNAL_URL ?? `http://localhost:${port}`).replace(/\/+$/, ''),
   sendEmail: createMailer({
     apiKey: process.env.RESEND_API_KEY,
-    from: process.env.EMAIL_FROM ?? 'Car Finder <onboarding@resend.dev>',
+    from: process.env.EMAIL_FROM ?? 'CarsFindMe <onboarding@resend.dev>',
   }),
 });
 
 createServer(app).listen(port, () => {
-  console.log(`Car Finder running at http://localhost:${port}`);
+  console.log(`CarsFindMe running at http://localhost:${port}`);
 });

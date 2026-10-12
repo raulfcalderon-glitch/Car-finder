@@ -197,7 +197,7 @@ test('closing a request hides it from dealers and blocks responses', async () =>
 test('serves the app and blocks path traversal', async () => {
   const res = await fetch(`${base}/`);
   assert.equal(res.status, 200);
-  assert.match(await res.text(), /Car Finder/);
+  assert.match(await res.text(), /CarsFindMe/);
   const traversal = await fetch(`${base}/..%2fsrc%2fapp.js`);
   assert.doesNotMatch(await traversal.text(), /createApp/);
 });

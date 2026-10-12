@@ -1,6 +1,6 @@
-# Car Finder
+# CarsFindMe
 
-A two-sided marketplace for hard-to-find vehicles.
+A two-sided marketplace for enthusiast cars — 911s, BMW M cars, special editions and exotics. Live at [carsfindme.com](https://carsfindme.com).
 
 - **Users** (buyers) post a request for the exact car they want — e.g. a 1987 Porsche 911 Carrera — with year range, budget, condition, color, location and notes.
 - **Dealers** (specialty dealerships, brokers, people in the car business) are approved by an admin, then browse every open request in a searchable, sortable list and respond with what they have and an asking price.
@@ -21,7 +21,7 @@ Environment variables:
 - `PORT` (default 3000), `DATABASE_FILE` (default `/var/data/car-finder.db` when a Render disk is mounted at `/var/data`, otherwise `data/car-finder.db`), `NODE_ENV=production` to mark the session cookie `Secure`.
 - `ADMIN_EMAILS` – comma-separated emails of the accounts that can approve dealers (on the **Admin** page) and get an email when a dealer signs up. New dealers stay "waiting for approval" until an admin approves them.
 - `RESEND_API_KEY` – API key from [Resend](https://resend.com) for email alerts. Without it, emails are printed to the server log instead of sent.
-- `EMAIL_FROM` – sender, e.g. `Car Finder <alerts@yourdomain.com>` (default `Car Finder <onboarding@resend.dev>`, Resend's test sender, which can only deliver to your own Resend account's email until you verify a domain).
+- `EMAIL_FROM` – sender, e.g. `CarsFindMe <alerts@yourdomain.com>` (default `CarsFindMe <onboarding@resend.dev>`, Resend's test sender, which can only deliver to your own Resend account's email until you verify a domain).
 - `APP_URL` – public address used for links in emails (defaults to Render's `RENDER_EXTERNAL_URL`).
 
 ## How it's built
