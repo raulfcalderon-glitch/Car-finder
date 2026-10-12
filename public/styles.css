@@ -156,7 +156,7 @@ dl.facts dd { margin: 0; }
 tbody tr.static { cursor: default; }
 
 /* admin */
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 12px; margin-bottom: 12px; }
 .card.stat { display: grid; gap: 2px; padding: 14px 16px; text-decoration: none; color: inherit; margin: 0; }
 .card.stat:hover { border-color: var(--accent); }
 .stat-n { font-size: 1.8rem; font-weight: 700; line-height: 1.1; }
@@ -297,3 +297,13 @@ fieldset.stack .makes-field input { width: 100%; }
 .check.done { background: var(--bg); }
 .check-box { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--border); display: grid; place-items: center; font-weight: 700; color: #fff; }
 .check.done .check-box { background: var(--ok); border-color: var(--ok); }
+
+/* reports */
+.report-row { margin-top: 6px; }
+.link-button { background: none; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: .85rem; font-weight: 500; text-decoration: underline; cursor: pointer; }
+.link-button:hover { color: var(--accent); }
+.report-form { margin-top: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.safety-tip { border-left: 3px solid var(--warn); background: var(--surface); padding: 10px 14px; border-radius: 8px; font-size: .92rem; }
+.card.report.open { border-left: 3px solid var(--accent); }
+.quoted { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--border); color: var(--muted); white-space: pre-wrap; }
+.card.stat.alert .stat-n { color: var(--accent); }

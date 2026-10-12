@@ -202,3 +202,33 @@ export function newRequestAlertEmail({ dealer, request, link, settingsLink, unsu
       <p style="color:#5f6b7a;font-size:13px"><a href="${esc(settingsLink)}" style="color:#5f6b7a">Change which requests you hear about</a> · <a href="${esc(unsubscribeLink)}" style="color:#5f6b7a">Unsubscribe</a><br>— CarsFindMe</p>`),
   };
 }
+
+// Email to admins when a buyer reports a dealer's response.
+export function dealerReportEmail({ to, report, dealer, reporter, request, response, reasonLabel, openReports, appUrl }) {
+  const link = `${appUrl}/#/admin/account/${dealer.id}`;
+  const details = [
+    ['Dealer', `${dealer.business_name || dealer.name} (${dealer.email})`],
+    ['Reported by', `${reporter.name} (${reporter.email})`],
+    ['Reason', reasonLabel],
+    ['Details', report.details],
+    ['Request', vehicleName(request)],
+    ['Their response', response.message],
+    ['Open reports on this dealer', String(openReports)],
+  ].filter(([, v]) => v);
+  return {
+    to,
+    replyTo: reporter.email,
+    subject: `Dealer reported: ${dealer.business_name || dealer.name} — ${reasonLabel}`,
+    text:
+      `A buyer reported a dealer on CarsFindMe.\n\n` +
+      details.map(([k, v]) => `${k}: ${v}`).join('\n') +
+      `\n\nReview the dealer (you can freeze them from there): ${link}\n— CarsFindMe`,
+    html: wrap(`
+      <p>A buyer reported a dealer on CarsFindMe.</p>
+      <table style="border-collapse:collapse;margin:12px 0">${details
+        .map(([k, v]) => `<tr><td style="color:#5f6b7a;padding:2px 16px 2px 0;vertical-align:top">${esc(k)}</td><td style="white-space:pre-wrap">${esc(v)}</td></tr>`)
+        .join('')}</table>
+      <p>${button(link, 'Review this dealer')}</p>
+      <p style="color:#5f6b7a;font-size:13px">You can freeze the dealer from their page if needed.<br>— CarsFindMe</p>`),
+  };
+}

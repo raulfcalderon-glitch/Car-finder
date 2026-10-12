@@ -11,6 +11,7 @@ import {
   verifyEmail,
   passwordResetEmail,
   newRequestAlertEmail,
+  dealerReportEmail,
 } from './email.js';
 import { createLimiter } from './ratelimit.js';
 import {
@@ -179,8 +180,27 @@ function serializeAdminAccount(a, isAdmin) {
             requiredChecks: requiredChecks(a),
             missingChecks: missingChecks(a),
             verified: isVerifiedDealer(a),
+            openReports: a.open_report_count ?? undefined,
+            totalReports: a.report_count ?? undefined,
           }
         : undefined,
+  };
+}
+
+function serializeReport(r) {
+  return {
+    id: r.id,
+    reason: r.reason,
+    reasonLabel: REPORT_REASONS[r.reason] ?? r.reason,
+    details: r.details,
+    status: r.status,
+    createdAt: r.created_at,
+    resolvedAt: r.resolved_at,
+    resolvedBy: r.resolved_by,
+    dealer: { id: r.dealer_id, name: r.dealer_name, businessName: r.dealer_business, frozen: Boolean(r.dealer_frozen_at) },
+    reporter: { id: r.reporter_id, name: r.reporter_name, email: r.reporter_email },
+    response: { id: r.response_id, message: r.response_message, price: r.response_price },
+    request: { id: r.request_id, make: r.make, model: r.model, trim: r.trim, yearMin: r.year_min, yearMax: r.year_max },
   };
 }
 
@@ -323,9 +343,19 @@ const ACCOUNT_SORTS = {
 const ACCOUNT_COUNTS = `
   (SELECT COUNT(*) FROM requests r WHERE r.user_id = a.id) AS request_count,
   (SELECT COUNT(*) FROM requests r WHERE r.user_id = a.id AND r.status = 'open') AS open_request_count,
-  (SELECT COUNT(*) FROM responses x WHERE x.dealer_id = a.id) AS response_count`;
+  (SELECT COUNT(*) FROM responses x WHERE x.dealer_id = a.id) AS response_count,
+  (SELECT COUNT(*) FROM dealer_reports d WHERE d.dealer_id = a.id AND d.status = 'open') AS open_report_count,
+  (SELECT COUNT(*) FROM dealer_reports d WHERE d.dealer_id = a.id) AS report_count`;
 
 const MINUTE = 60_000;
+
+export const REPORT_REASONS = {
+  deposit: 'Asked for a deposit, wire or payment up front',
+  misleading: 'Misleading or fake car or details',
+  conduct: 'Rude, pushy or inappropriate',
+  spam: 'Spam or unrelated to my request',
+  other: 'Something else',
+};
 
 // Abuse limits. Per-email limits are the real protection; per-IP limits are a backstop.
 const DEFAULT_LIMITS = {
@@ -464,6 +494,16 @@ export function createApp(
         website = :website, license_number = :license_number, license_state = :license_state, experience = :experience
       WHERE id = :id`),
     setChecks: db.prepare('UPDATE accounts SET verification_checks = ? WHERE id = ?'),
+    insertReport: db.prepare(
+      'INSERT INTO dealer_reports (response_id, dealer_id, reporter_id, reason, details) VALUES (?, ?, ?, ?, ?)',
+    ),
+    reportedByMe: db.prepare('SELECT 1 FROM dealer_reports WHERE response_id = ? AND reporter_id = ?'),
+    openReportsForDealer: db.prepare("SELECT COUNT(*) AS n FROM dealer_reports WHERE dealer_id = ? AND status = 'open'"),
+    setReportStatus: db.prepare(`
+      UPDATE dealer_reports SET status = :status,
+        resolved_at = CASE WHEN :status = 'resolved' THEN datetime('now') END,
+        resolved_by = CASE WHEN :status = 'resolved' THEN :by END
+      WHERE id = :id`),
     setAlerts: db.prepare('UPDATE accounts SET alert_mode = ?, alert_makes = ?, alert_min_budget = ? WHERE id = ?'),
     unsubscribeAlerts: db.prepare("UPDATE accounts SET alert_mode = 'off' WHERE alert_token = ? AND role = 'dealer'"),
     setAccountStatus: db.prepare('UPDATE accounts SET status = ? WHERE id = ?'),
@@ -718,6 +758,34 @@ export function createApp(
     return { role, status, sort: sortKey, accounts: rows.map((a) => serializeAdminAccount(a, isAdmin(a))) };
   }
 
+  const REPORT_SELECT = `
+    SELECT d.*, dl.name AS dealer_name, dl.business_name AS dealer_business, dl.frozen_at AS dealer_frozen_at,
+      rp.name AS reporter_name, rp.email AS reporter_email,
+      x.message AS response_message, x.price AS response_price,
+      r.id AS request_id, r.make, r.model, r.trim, r.year_min, r.year_max
+    FROM dealer_reports d
+    JOIN accounts dl ON dl.id = d.dealer_id
+    JOIN accounts rp ON rp.id = d.reporter_id
+    JOIN responses x ON x.id = d.response_id
+    JOIN requests r ON r.id = x.request_id`;
+
+  function listReports({ status = 'open', dealerId = null } = {}) {
+    const where = [];
+    const args = {};
+    if (status !== 'all') {
+      where.push('d.status = :status');
+      args.status = status;
+    }
+    if (dealerId) {
+      where.push('d.dealer_id = :dealerId');
+      args.dealerId = dealerId;
+    }
+    return db
+      .prepare(`${REPORT_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY d.created_at DESC, d.id DESC LIMIT 500`)
+      .all(args)
+      .map(serializeReport);
+  }
+
   function adminStats() {
     const one = (sql) => db.prepare(sql).get().n;
     return {
@@ -727,6 +795,7 @@ export function createApp(
       frozen: one('SELECT COUNT(*) AS n FROM accounts WHERE frozen_at IS NOT NULL'),
       openRequests: one("SELECT COUNT(*) AS n FROM visible_requests WHERE status = 'open'"),
       hiddenRequests: one("SELECT COUNT(*) AS n FROM requests WHERE hidden_at IS NOT NULL AND status = 'open'"),
+      openReports: one("SELECT COUNT(*) AS n FROM dealer_reports WHERE status = 'open'"),
       requestsLast7Days: one("SELECT COUNT(*) AS n FROM requests WHERE created_at >= datetime('now', '-7 days')"),
       responsesLast7Days: one("SELECT COUNT(*) AS n FROM responses WHERE created_at >= datetime('now', '-7 days')"),
       newAccountsLast7Days: one("SELECT COUNT(*) AS n FROM accounts WHERE created_at >= datetime('now', '-7 days')"),
@@ -1038,7 +1107,52 @@ export function createApp(
       );
     }],
 
+    // A buyer reports a dealer's response to their own request.
+    ['POST', /^\/api\/responses\/(\d+)\/reports$/, async (req, res, [id]) => {
+      const account = requireAccount(req, 'user');
+      const response = q.responseById.get(Number(id));
+      const request = response && loadRequest(response.request_id);
+      if (!response || request.user_id !== account.id) throw new HttpError(404, 'Response not found');
+      const body = await readJson(req);
+      const reason = oneOf(body.reason, 'Reason', Object.keys(REPORT_REASONS), null);
+      if (!reason) throw new HttpError(400, 'Choose a reason');
+      const details = str(body.details, 'Details', { max: 2000 });
+      try {
+        q.insertReport.run(response.id, response.dealer_id, account.id, reason, details);
+      } catch (err) {
+        if (/UNIQUE/.test(err.message)) throw new HttpError(409, "You've already reported this response");
+        throw err;
+      }
+      sendJson(res, 201, { ok: true });
+
+      const dealer = q.accountById.get(response.dealer_id);
+      const openReports = q.openReportsForDealer.get(dealer.id).n;
+      for (const to of admins) {
+        notify(
+          dealerReportEmail({
+            to, dealer, reporter: account, request, response, appUrl, openReports,
+            report: { reason, details }, reasonLabel: REPORT_REASONS[reason],
+          }),
+        );
+      }
+    }],
+
     // --- admin ---
+
+    ['GET', /^\/api\/admin\/reports$/, async (req, res, _m, url) => {
+      requireAdmin(req);
+      const status = oneOf(url.searchParams.get('status') || undefined, 'status', ['open', 'resolved', 'all'], 'open');
+      sendJson(res, 200, { status, reports: listReports({ status }) });
+    }],
+
+    ['PATCH', /^\/api\/admin\/reports\/(\d+)$/, async (req, res, [id]) => {
+      const me = requireAdmin(req);
+      const status = oneOf((await readJson(req)).status, 'Status', ['open', 'resolved'], null);
+      if (!status) throw new HttpError(400, 'Status is required');
+      const { changes } = q.setReportStatus.run({ status, by: me.email, id: Number(id) });
+      if (!changes) throw new HttpError(404, 'Report not found');
+      sendJson(res, 200, { report: serializeReport(db.prepare(`${REPORT_SELECT} WHERE d.id = ?`).get(Number(id))) });
+    }],
 
     // A consistent copy of the whole database, for safekeeping.
     ['GET', /^\/api\/admin\/backup$/, async (req, res) => {
@@ -1084,7 +1198,8 @@ export function createApp(
               request: serializeRequest({ ...x, id: x.request_id, status: x.request_status, created_at: undefined }),
             }))
           : [];
-      sendJson(res, 200, { account, requests, responses });
+      const reports = account.role === 'dealer' ? listReports({ status: 'all', dealerId: account.id }) : [];
+      sendJson(res, 200, { account, requests, responses, reports });
     }],
 
     // Approve / reject a dealer, and freeze / unfreeze any account.
@@ -1166,7 +1281,10 @@ export function createApp(
       let responses;
       if (account.role === 'user' && request.user_id === account.id) {
         viewer = 'owner';
-        responses = q.responsesForRequest.all(request.id).map(withPhotos);
+        responses = q.responsesForRequest.all(request.id).map((x) => ({
+          ...withPhotos(x),
+          reportedByMe: Boolean(q.reportedByMe.get(x.id, account.id)),
+        }));
       } else if (admin) {
         // Admins see every response, including ones hidden because the dealer is frozen.
         viewer = 'admin';

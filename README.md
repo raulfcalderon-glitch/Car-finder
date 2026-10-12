@@ -9,6 +9,7 @@ A two-sided marketplace for enthusiast cars — 911s, BMW M cars, special editio
 - **Dealer alerts:** approved dealers get an email for each new request — all of them, only certain makes, or off, with an optional minimum budget (set on the **Alerts** page). Emails include a one-click unsubscribe (also via mail apps' `List-Unsubscribe`).
 - **Photos:** dealers can attach up to 6 photos to a response. The browser shrinks them (max 1600px JPEG) before upload; the server checks they're real JPEG/PNG/WebP files and stores them in `uploads/` next to the database (so on the persistent disk). Buyers see them on the request and in the response email.
 - **Profiles:** everyone can upload a profile picture (center-cropped to a square in the browser); without one, a colored circle shows up to two initials (business name for dealers). Dealers' pictures show on their responses, buyers' on their requests.
+- **Reports:** buyers can report a dealer's response (deposit/wire request, misleading, conduct, spam, other) once per response; admins get an email and a **Reports** tab to review and resolve, and each dealer's page lists its reports.
 - Buyers get an **email alert** when a dealer responds, and see each response with the dealer's contact details. Dealers only see a buyer's first name and only their own responses, not competitors'.
 
 ## Run it
@@ -77,6 +78,9 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 | PATCH | `/api/admin/requests/:id` | admin | Edit any request field, set `status`, or `hidden: true` (with optional `reason`) / `false` to hide it from dealers |
 | DELETE | `/api/admin/requests/:id` | admin | Permanently delete a request and its responses |
 | POST | `/api/requests/:id/responses` | approved dealer | Respond with `message`, optional `price`, and optional `photos` (up to 6 image data URLs) |
+| POST | `/api/responses/:id/reports` | buyer who received it | Report a dealer's response: `reason` (`deposit`, `misleading`, `conduct`, `spam`, `other`), optional `details` |
+| GET | `/api/admin/reports?status=open` | admin | Reports (`open`, `resolved`, `all`) with dealer, reporter, request and response |
+| PATCH | `/api/admin/reports/:id` | admin | Set a report's `status` (`resolved` or `open`) |
 | GET | `/uploads/:file` | anyone with the link | A response photo (random, unguessable names) |
 
 `GET /api/requests` query parameters: `q` (free text; every word must match make/model/trim/color/location/notes, and a 4-digit year matches requests whose range covers it), `make`, `year` (requests whose range includes it), `condition`, `minBudget`, `status` (`open` by default, or `all`), `sort` (`newest`, `oldest`, `budget_desc`, `budget_asc`, `year_desc`, `year_asc`, `make`, `responses`), `limit`, `offset`.

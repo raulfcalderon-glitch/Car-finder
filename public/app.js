@@ -844,6 +844,24 @@ async function requestDetail(id) {
                 }</div>`
               : ''
           }
+          ${
+            isOwner
+              ? x.reportedByMe
+                ? '<div class="report-row"><span class="muted">Reported — thanks, we\'re looking into it.</span></div>'
+                : `<div class="report-row"><button type="button" class="link-button" data-report="${x.id}">Report this dealer</button></div>
+                   <form class="report-form" data-report-form="${x.id}" hidden>
+                     <label>What happened?
+                       <select name="reason" required>
+                         <option value="">Choose a reason…</option>
+                         ${Object.entries(REPORT_REASONS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+                       </select>
+                     </label>
+                     <label>Details <span class="hint">optional — anything that helps us check</span><textarea name="details" rows="3"></textarea></label>
+                     <p class="error"></p>
+                     <div class="row"><button type="submit">Send report</button><button type="button" class="secondary" data-report-cancel="${x.id}">Cancel</button></div>
+                   </form>`
+              : ''
+          }
         </div>`,
         )
         .join('')
@@ -909,13 +927,18 @@ async function requestDetail(id) {
       }
     </div>
     <h2 style="margin-top:24px">${seesContacts ? `Dealer responses (${responses.length})` : 'Your responses'}</h2>
+    ${
+      isOwner && responses.length
+        ? '<p class="safety-tip"><strong>Stay safe:</strong> never wire money or pay a deposit before you\'ve seen the car (or had it inspected) and checked the title. If a dealer pressures you to pay up front, please report them.</p>'
+        : ''
+    }
     ${responseHtml}
     ${
       viewer === 'dealer' && r.status === 'open'
         ? `<div class="card">
             <h3>Respond to this buyer</h3>
             <p class="muted">Your business name, email${me.phone ? ', and phone' : ''} will be shared with the buyer.</p>
-            <form>
+            <form id="response-form">
               <label>Asking price (USD) <span class="hint">optional</span><input name="price" type="number" min="0" step="500"></label>
               <label>Message <textarea name="message" required placeholder="I have a 1987 Carrera Targa in Guards Red, 64k miles, full records…"></textarea></label>
               <div class="photo-picker">
@@ -955,6 +978,25 @@ async function requestDetail(id) {
     });
   }
 
+  view.querySelectorAll('[data-report]').forEach((b) =>
+    b.addEventListener('click', () => {
+      view.querySelector(`[data-report-form="${b.dataset.report}"]`).hidden = false;
+      b.hidden = true;
+    }),
+  );
+  view.querySelectorAll('[data-report-cancel]').forEach((b) =>
+    b.addEventListener('click', () => {
+      view.querySelector(`[data-report-form="${b.dataset.reportCancel}"]`).hidden = true;
+      view.querySelector(`[data-report="${b.dataset.reportCancel}"]`).hidden = false;
+    }),
+  );
+  view.querySelectorAll('[data-report-form]').forEach((f) =>
+    bindForm(f, async (data) => {
+      await api(`/api/responses/${f.dataset.reportForm}/reports`, { method: 'POST', body: data });
+      f.outerHTML = '<p class="muted">Thanks — we\'ve been notified and will look into it. You don\'t need to do anything else.</p>';
+    }),
+  );
+
   view.querySelectorAll('[data-status]').forEach((b) =>
     b.addEventListener('click', async () => {
       const path = isAdminView ? `/api/admin/requests/${r.id}` : `/api/requests/${r.id}`;
@@ -962,7 +1004,7 @@ async function requestDetail(id) {
       render();
     }),
   );
-  const form = view.querySelector('form');
+  const form = view.querySelector('#response-form');
   if (form) {
     const photos = []; // shrunk data URLs, in the order they'll be sent
     const previews = view.querySelector('#photo-previews');
@@ -1001,6 +1043,14 @@ async function requestDetail(id) {
 }
 
 const MAX_PHOTOS = 6;
+
+const REPORT_REASONS = {
+  deposit: 'Asked for a deposit, wire or payment up front',
+  misleading: 'Misleading or fake car or details',
+  conduct: 'Rude, pushy or inappropriate',
+  spam: 'Spam or unrelated to my request',
+  other: 'Something else',
+};
 
 // Resizes a photo on the device (max 1600px, JPEG) so uploads are quick even on mobile data.
 async function shrinkPhoto(file, maxSide = 1600) {
@@ -1079,8 +1129,8 @@ const when = (d) => (d ? ago(d) : '<span class="muted">never</span>');
 
 // Stat tiles and the Dealers / Users / Requests tabs shared by the admin list pages.
 function adminHeader(stats, tab) {
-  const tile = (n, label, href) =>
-    `<a class="card stat" href="${href}"><span class="stat-n">${n}</span><span class="muted">${label}</span></a>`;
+  const tile = (n, label, href, extra = '') =>
+    `<a class="card stat ${extra}" href="${href}"><span class="stat-n">${n}</span><span class="muted">${label}</span></a>`;
   return `
     <h1>Admin</h1>
     <div class="stats">
@@ -1089,6 +1139,7 @@ function adminHeader(stats, tab) {
       ${tile(stats.users, 'Users', '#/admin?role=user&status=all')}
       ${tile(stats.openRequests, 'Open requests', '#/admin/requests')}
       ${tile(stats.responsesLast7Days, 'Responses (7 days)', '#/admin?role=dealer&status=active&sort=activity')}
+      ${tile(stats.openReports, 'Open reports', '#/admin/reports', stats.openReports ? 'alert' : '')}
       ${tile(stats.frozen, 'Frozen accounts', '#/admin?role=user&status=frozen')}
     </div>
     <p class="muted" style="margin-top:-4px">Last 7 days: ${stats.newAccountsLast7Days} new accounts · ${stats.requestsLast7Days} new requests${
@@ -1098,6 +1149,7 @@ function adminHeader(stats, tab) {
       <a class="button ${tab === 'dealer' ? '' : 'secondary'}" href="#/admin?role=dealer">Dealers</a>
       <a class="button ${tab === 'user' ? '' : 'secondary'}" href="#/admin?role=user&status=all">Users</a>
       <a class="button ${tab === 'requests' ? '' : 'secondary'}" href="#/admin/requests">Requests</a>
+      <a class="button ${tab === 'reports' ? '' : 'secondary'}" href="#/admin/reports">Reports${stats.openReports ? ` (${stats.openReports})` : ''}</a>
       <a class="backup-link" href="/api/admin/backup" download title="Download a copy of the whole database">Download backup</a>
     </div>`;
 }
@@ -1122,6 +1174,55 @@ const ADMIN_REQUEST_SORTS = [
   ['responses', 'Most responses'],
 ];
 const pick = (options, value, fallback) => (options.some(([v]) => v === value) ? value : fallback);
+
+function reportCard(rep, { showDealer = true } = {}) {
+  return `
+    <div class="card report ${rep.status}">
+      <div class="row spread">
+        <strong>${esc(rep.reasonLabel)}</strong>
+        <span>${rep.status === 'open' ? '<span class="pill closed">open</span>' : '<span class="pill fulfilled">resolved</span>'} <span class="muted">${ago(rep.createdAt)}</span></span>
+      </div>
+      ${showDealer ? `<div>Dealer: <a href="#/admin/account/${rep.dealer.id}">${esc(rep.dealer.businessName || rep.dealer.name)}</a>${rep.dealer.frozen ? ' <span class="pill closed">frozen</span>' : ''}</div>` : ''}
+      <div class="muted">Reported by <a href="#/admin/account/${rep.reporter.id}">${esc(rep.reporter.name)}</a> (${esc(rep.reporter.email)}) about their request <a href="#/request/${rep.request.id}">${esc(vehicleTitle(rep.request))}</a></div>
+      ${rep.details ? `<p style="white-space:pre-wrap">“${esc(rep.details)}”</p>` : ''}
+      <blockquote class="quoted">Dealer's response${rep.response.price != null ? ` (${money(rep.response.price)})` : ''}: ${esc(rep.response.message.slice(0, 400))}</blockquote>
+      <div class="row">
+        ${
+          rep.status === 'open'
+            ? `<button class="small" data-resolve="${rep.id}">Mark resolved</button>`
+            : `<span class="muted">Resolved by ${esc(rep.resolvedBy ?? '')} ${rep.resolvedAt ? ago(rep.resolvedAt) : ''}</span><button class="secondary small" data-reopen="${rep.id}">Reopen</button>`
+        }
+        ${showDealer ? `<a href="#/admin/account/${rep.dealer.id}">Open dealer to freeze or review</a>` : ''}
+      </div>
+    </div>`;
+}
+
+function bindReportButtons() {
+  const set = async (id, status) => {
+    await api(`/api/admin/reports/${id}`, { method: 'PATCH', body: { status } });
+    render();
+  };
+  view.querySelectorAll('[data-resolve]').forEach((b) => b.addEventListener('click', () => set(b.dataset.resolve, 'resolved')));
+  view.querySelectorAll('[data-reopen]').forEach((b) => b.addEventListener('click', () => set(b.dataset.reopen, 'open')));
+}
+
+async function adminReports(params) {
+  const status = pick([['open'], ['resolved'], ['all']], params.get('status'), 'open');
+  const [{ stats }, { reports }] = await Promise.all([api('/api/admin/stats'), api(`/api/admin/reports?status=${status}`)]);
+  view.innerHTML = `
+    ${adminHeader(stats, 'reports')}
+    <div class="row" style="margin-bottom:12px">
+      ${[['open', 'Open'], ['resolved', 'Resolved'], ['all', 'All']]
+        .map(([v, l]) => `<a class="button small ${v === status ? '' : 'secondary'}" href="#/admin/reports?status=${v}">${l}</a>`)
+        .join('')}
+    </div>
+    ${
+      reports.length
+        ? `<div class="list">${reports.map((rep) => reportCard(rep)).join('')}</div>`
+        : `<div class="card empty">${status === 'open' ? 'No open reports. 🎉' : 'No reports.'}</div>`
+    }`;
+  bindReportButtons();
+}
 
 async function adminRequests(params) {
   const state = {
@@ -1249,7 +1350,9 @@ async function admin(params) {
                   role === 'dealer' ? `<br><span class="muted">${esc(a.name)}</span>` : ''
                 }${a.isAdmin ? ' <span class="pill open">admin</span>' : ''}</div></div></td>
                 <td>${esc(a.email)}${a.phone ? `<br><span class="muted">${esc(a.phone)}</span>` : ''}</td>
-                <td>${accountBadge(a)}${unverifiedBadge(a)}</td>
+                <td>${accountBadge(a)}${unverifiedBadge(a)}${
+                  a.dealer?.openReports ? ` <span class="pill closed">${a.dealer.openReports} report${a.dealer.openReports === 1 ? '' : 's'}</span>` : ''
+                }</td>
                 ${role === 'dealer' ? `<td>${a.responseCount}</td>` : `<td>${a.requestCount}</td><td>${a.openRequestCount}</td>`}
                 <td>${ago(a.createdAt)}</td>
                 <td>${when(a.lastLoginAt)}</td>
@@ -1292,7 +1395,7 @@ async function admin(params) {
 }
 
 async function adminAccount(id) {
-  const { account: a, requests, responses } = await api(`/api/admin/accounts/${id}`);
+  const { account: a, requests, responses, reports } = await api(`/api/admin/accounts/${id}`);
   const isDealer = a.role === 'dealer';
   const listHref = `#/admin?role=${a.role}${isDealer ? '&status=all' : ''}`;
 
@@ -1374,6 +1477,11 @@ async function adminAccount(id) {
       <p class="error" id="admin-error"></p>
     </div>
     ${isDealer ? verificationSection(a) : ''}
+    ${
+      isDealer && reports.length
+        ? `<h2 style="margin-top:24px">Reports from buyers (${a.dealer.openReports} open)</h2><div class="list">${reports.map((rep) => reportCard(rep, { showDealer: false })).join('')}</div>`
+        : ''
+    }
     <h2 style="margin-top:24px">${isDealer ? 'Responses' : 'Requests'}</h2>
     ${activity}`;
 
@@ -1403,6 +1511,7 @@ async function adminAccount(id) {
     patch({ frozen: true, reason });
   });
   view.querySelectorAll('tr[data-href]').forEach((tr) => tr.addEventListener('click', () => go(tr.dataset.href)));
+  bindReportButtons();
   view.querySelectorAll('[data-check]').forEach((b) =>
     b.addEventListener('click', () => {
       if (b.dataset.done === 'false') return patch({ check: b.dataset.check, done: false });
@@ -1514,6 +1623,7 @@ async function render() {
     const adminDetail = path.match(/^\/admin\/account\/(\d+)$/);
     if (me.isAdmin && adminDetail) return await adminAccount(adminDetail[1]);
     if (me.isAdmin && path === '/admin/requests') return await adminRequests(params);
+    if (me.isAdmin && path === '/admin/reports') return await adminReports(params);
     const adminEdit = path.match(/^\/admin\/request\/(\d+)\/edit$/);
     if (me.isAdmin && adminEdit) return await adminEditRequest(adminEdit[1]);
     if (dealerBlocked()) return dealerNotApproved();

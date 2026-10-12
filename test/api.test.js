@@ -903,3 +903,53 @@ test('brokers without a license only need the website and call checks', async ()
   assert.equal(approved.body.account.dealer.verified, true);
   assert.equal(approved.body.account.dealer.type, 'broker');
 });
+
+test('buyers can report a dealer; admins are emailed and can resolve reports', async () => {
+  const adminCall = await admin();
+  const buyer = await signup('user', { name: 'Riley Reporter', email: 'reporter@test.com' });
+  const otherBuyer = await signup('user');
+  const dealer = await signup('dealer', { businessName: 'Shady Imports', email: 'shady@test.com' });
+  const { body } = await buyer('POST', '/api/requests', { make: 'Porsche', model: '911 Sport Classic' });
+  const response = (await dealer('POST', `/api/requests/${body.request.id}/responses`, { message: 'Wire $10k today to hold it' })).body.response;
+  const report = (b, payload) => b('POST', `/api/responses/${response.id}/reports`, payload);
+
+  // Only the buyer who received the response can report it, with a valid reason.
+  assert.equal((await report(otherBuyer, { reason: 'deposit' })).status, 404);
+  assert.equal((await report(dealer, { reason: 'deposit' })).status, 403);
+  assert.equal((await report(buyer, { reason: 'because' })).status, 400);
+  assert.equal((await report(buyer, {})).status, 400);
+
+  sentEmails.length = 0;
+  assert.equal((await report(buyer, { reason: 'deposit', details: 'Wanted a wire before I could see it' })).status, 201);
+  assert.equal((await report(buyer, { reason: 'spam' })).status, 409, 'once per response');
+  await tick();
+  const email = sentEmails.find((e) => e.to === 'admin@test.com' && e.subject.startsWith('Dealer reported'));
+  assert.equal(email.subject, 'Dealer reported: Shady Imports — Asked for a deposit, wire or payment up front');
+  assert.match(email.text, /Wanted a wire before I could see it/);
+  assert.match(email.text, /Wire \$10k today/);
+  assert.match(email.text, new RegExp(`/#/admin/account/${dealer.account.id}`));
+  assert.equal(email.replyTo, 'reporter@test.com');
+
+  // The buyer sees it as reported.
+  assert.equal((await buyer('GET', `/api/requests/${body.request.id}`)).body.responses[0].reportedByMe, true);
+
+  // Admins see it in the list, on the dealer, and in the stats; then resolve it.
+  assert.equal((await buyer('GET', '/api/admin/reports')).status, 403);
+  const open = (await adminCall('GET', '/api/admin/reports')).body.reports.find((r) => r.response.id === response.id);
+  assert.equal(open.status, 'open');
+  assert.equal(open.reporter.email, 'reporter@test.com');
+  assert.equal(open.dealer.businessName, 'Shady Imports');
+  assert.equal(open.request.model, '911 Sport Classic');
+  assert.ok((await adminCall('GET', '/api/admin/stats')).body.stats.openReports >= 1);
+  const dealerView = (await adminCall('GET', `/api/admin/accounts/${dealer.account.id}`)).body;
+  assert.equal(dealerView.account.dealer.openReports, 1);
+  assert.equal(dealerView.reports.length, 1);
+
+  const resolved = await adminCall('PATCH', `/api/admin/reports/${open.id}`, { status: 'resolved' });
+  assert.equal(resolved.body.report.status, 'resolved');
+  assert.equal(resolved.body.report.resolvedBy, 'admin@test.com');
+  assert.ok(!(await adminCall('GET', '/api/admin/reports')).body.reports.some((r) => r.id === open.id));
+  assert.ok((await adminCall('GET', '/api/admin/reports?status=resolved')).body.reports.some((r) => r.id === open.id));
+  assert.equal((await adminCall('GET', `/api/admin/accounts/${dealer.account.id}`)).body.account.dealer.openReports, 0);
+  assert.equal((await adminCall('PATCH', '/api/admin/reports/999999', { status: 'resolved' })).status, 404);
+});

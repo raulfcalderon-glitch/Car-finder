@@ -101,6 +101,23 @@ const SCHEMA = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_response_photos_response ON response_photos(response_id);
+
+  -- A buyer flagging a dealer's response (e.g. asked for a wire deposit). Reviewed by admins.
+  CREATE TABLE IF NOT EXISTS dealer_reports (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    response_id INTEGER NOT NULL REFERENCES responses(id) ON DELETE CASCADE,
+    dealer_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    reporter_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    reason      TEXT NOT NULL,
+    details     TEXT,
+    status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+    resolved_at TEXT,
+    resolved_by TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (response_id, reporter_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_dealer_reports_dealer ON dealer_reports(dealer_id, status);
 `;
 
 // What dealers are allowed to see: no hidden requests and nothing from frozen accounts.
