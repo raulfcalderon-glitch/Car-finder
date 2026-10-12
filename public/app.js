@@ -164,7 +164,7 @@ function renderNav() {
         ${
           me.role === 'dealer'
             ? '<a href="#/dealer-profile" role="menuitem">My profile</a><a href="#/alerts" role="menuitem">Alerts</a>'
-            : '<a href="#/profile" role="menuitem">Profile &amp; photo</a>'
+            : '<a href="#/profile" role="menuitem">My profile</a>'
         }
         <a href="#/contact" role="menuitem">Contact us</a>
         <button type="button" id="logout" role="menuitem">Log out</button>
@@ -199,7 +199,7 @@ document.addEventListener('keydown', (e) => {
 function profilePage() {
   view.innerHTML = `
     <div class="card profile" style="max-width:560px;margin:0 auto">
-      <h1>Profile</h1>
+      <h1>My profile</h1>
       <div class="profile-row">
         <div id="profile-avatar">${avatar(me, 96)}</div>
         <div>
