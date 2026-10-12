@@ -19,6 +19,8 @@ const warning = process.env.RENDER && !onDisk ? ' — WARNING: not on a persiste
 console.log(`Database: ${dbFile} (${accounts} accounts)${warning}`);
 const app = createApp(db, {
   secureCookies: process.env.NODE_ENV === 'production',
+  // Comma-separated emails of people who can approve dealers, e.g. "you@example.com,partner@example.com".
+  adminEmails: (process.env.ADMIN_EMAILS ?? '').split(','),
   // Render sets RENDER_EXTERNAL_URL automatically; APP_URL overrides it (e.g. for a custom domain).
   appUrl: (process.env.APP_URL ?? process.env.RENDER_EXTERNAL_URL ?? `http://localhost:${port}`).replace(/\/+$/, ''),
   sendEmail: createMailer({

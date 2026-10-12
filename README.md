@@ -3,7 +3,7 @@
 A two-sided marketplace for hard-to-find vehicles.
 
 - **Users** (buyers) post a request for the exact car they want — e.g. a 1987 Porsche 911 Carrera — with year range, budget, condition, color, location and notes.
-- **Dealers** (specialty dealerships, brokers, people in the car business) browse every open request in a searchable, sortable list and respond with what they have and an asking price.
+- **Dealers** (specialty dealerships, brokers, people in the car business) are approved by an admin, then browse every open request in a searchable, sortable list and respond with what they have and an asking price.
 - Buyers get an **email alert** when a dealer responds, and see each response with the dealer's contact details. Dealers only see a buyer's first name and only their own responses, not competitors'.
 
 ## Run it
@@ -19,6 +19,7 @@ npm test
 Environment variables:
 
 - `PORT` (default 3000), `DATABASE_FILE` (default `/var/data/car-finder.db` when a Render disk is mounted at `/var/data`, otherwise `data/car-finder.db`), `NODE_ENV=production` to mark the session cookie `Secure`.
+- `ADMIN_EMAILS` – comma-separated emails of the accounts that can approve dealers (on the **Admin** page) and get an email when a dealer signs up. New dealers stay "waiting for approval" until an admin approves them.
 - `RESEND_API_KEY` – API key from [Resend](https://resend.com) for email alerts. Without it, emails are printed to the server log instead of sent.
 - `EMAIL_FROM` – sender, e.g. `Car Finder <alerts@yourdomain.com>` (default `Car Finder <onboarding@resend.dev>`, Resend's test sender, which can only deliver to your own Resend account's email until you verify a domain).
 - `APP_URL` – public address used for links in emails (defaults to Render's `RENDER_EXTERNAL_URL`).
@@ -42,16 +43,17 @@ Environment variables:
 | POST | `/api/requests` | user | Post a vehicle request |
 | GET | `/api/my/requests` | user | Your requests with response counts |
 | PATCH | `/api/requests/:id` | owning user | Edit fields or set `status` (`open`, `fulfilled`, `closed`) |
-| GET | `/api/requests` | dealer | Search open requests (see below) |
+| GET | `/api/requests` | approved dealer | Search open requests (see below) |
 | GET | `/api/makes` | dealer | Makes that have open requests (for the filter) |
 | GET | `/api/requests/:id` | owner or dealer | Request details plus responses |
-| POST | `/api/requests/:id/responses` | dealer | Respond with `message` and optional `price` |
+| GET | `/api/admin/dealers?status=pending` | admin | Dealers by status (`pending`, `active`, `rejected`) with counts |
+| PATCH | `/api/admin/dealers/:id` | admin | Approve (`active`), reject or revoke (`rejected`) a dealer |
+| POST | `/api/requests/:id/responses` | approved dealer | Respond with `message` and optional `price` |
 
 `GET /api/requests` query parameters: `q` (free text; every word must match make/model/trim/color/location/notes, and a 4-digit year matches requests whose range covers it), `make`, `year` (requests whose range includes it), `condition`, `minBudget`, `status` (`open` by default, or `all`), `sort` (`newest`, `oldest`, `budget_desc`, `budget_asc`, `year_desc`, `year_asc`, `make`, `responses`), `limit`, `offset`.
 
 ## Ideas for next steps
 
 - Email alerts to dealers when a new request matches a saved search; SMS alerts.
-- Dealer verification before they can respond.
 - Photos on dealer responses, and in-app messaging instead of sharing contact details.
 - Deploy behind HTTPS (e.g. Fly.io, Render, Railway) with a persistent volume for the SQLite file, or move to Postgres.

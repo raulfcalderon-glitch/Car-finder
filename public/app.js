@@ -87,9 +87,11 @@ function renderNav() {
   }
   const links =
     me.role === 'dealer'
-      ? `<a href="#/browse">Browse requests</a>`
+      ? me.status === 'active'
+        ? `<a href="#/browse">Browse requests</a>`
+        : ''
       : `<a href="#/my">My requests</a><a href="#/new">New request</a>`;
-  nav.innerHTML = `${links}
+  nav.innerHTML = `${links}${me.isAdmin ? `<a href="#/admin">Admin</a>` : ''}
     <span class="who">${esc(me.businessName || me.name)} · ${me.role === 'dealer' ? 'Dealer' : 'Buyer'}</span>
     <a href="#" id="logout">Log out</a>`;
   nav.querySelector('#logout').addEventListener('click', async (e) => {
@@ -426,9 +428,86 @@ async function requestDetail(id) {
   }
 }
 
+function dealerNotApproved() {
+  const rejected = me.status === 'rejected';
+  view.innerHTML = `
+    <div class="narrow card" style="text-align:center">
+      <h1>${rejected ? 'Account not approved' : 'Thanks for signing up!'}</h1>
+      ${
+        rejected
+          ? `<p class="muted">Your dealer account for ${esc(me.businessName)} wasn't approved. If you think this is a mistake, reply to any Car Finder email or contact us.</p>`
+          : `<p>We review every dealer before they can see buyer requests, to keep buyers' information safe.</p>
+             <p class="muted">You'll get an email at <strong>${esc(me.email)}</strong> as soon as <strong>${esc(me.businessName)}</strong> is approved.</p>
+             <button class="secondary" id="recheck">Check again</button>`
+      }
+    </div>`;
+  view.querySelector('#recheck')?.addEventListener('click', async () => {
+    me = (await api('/api/me')).account;
+    render();
+  });
+}
+
+const DEALER_TABS = [
+  ['pending', 'Waiting for approval'],
+  ['active', 'Approved'],
+  ['rejected', 'Rejected'],
+];
+
+async function admin(params) {
+  const status = DEALER_TABS.some(([s]) => s === params.get('status')) ? params.get('status') : 'pending';
+  const { counts, dealers } = await api(`/api/admin/dealers?status=${status}`);
+
+  const actions = (d) =>
+    [
+      d.status !== 'active' && `<button data-id="${d.id}" data-status="active">Approve</button>`,
+      d.status !== 'rejected' && `<button class="secondary" data-id="${d.id}" data-status="rejected">${d.status === 'active' ? 'Revoke' : 'Reject'}</button>`,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+  view.innerHTML = `
+    <h1>Dealers</h1>
+    <div class="row" style="margin-bottom:16px">
+      ${DEALER_TABS.map(
+        ([s, label]) =>
+          `<a class="button ${s === status ? '' : 'secondary'}" href="#/admin?status=${s}">${label} (${counts[s]})</a>`,
+      ).join('')}
+    </div>
+    ${
+      dealers.length
+        ? `<div class="table-wrap"><table>
+            <thead><tr><th>Business</th><th>Contact</th><th>Signed up</th>${status === 'active' ? '<th>Responses</th>' : ''}<th></th></tr></thead>
+            <tbody>${dealers
+              .map(
+                (d) => `
+              <tr class="static">
+                <td><strong>${esc(d.businessName || '—')}</strong></td>
+                <td>${esc(d.name)}<br><a href="mailto:${esc(d.email)}">${esc(d.email)}</a>${d.phone ? `<br><a href="tel:${esc(d.phone)}">${esc(d.phone)}</a>` : ''}</td>
+                <td>${ago(d.createdAt)}</td>
+                ${status === 'active' ? `<td>${d.responseCount}</td>` : ''}
+                <td><div class="row">${actions(d)}</div></td>
+              </tr>`,
+              )
+              .join('')}</tbody>
+          </table></div>`
+        : `<div class="card empty">${status === 'pending' ? 'No dealers waiting for approval.' : 'None yet.'}</div>`
+    }`;
+
+  view.querySelectorAll('button[data-status]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const verb = { active: 'Approve', rejected: b.textContent }[b.dataset.status];
+      if (b.dataset.status === 'rejected' && !confirm(`${verb} this dealer? They will lose access to buyer requests.`)) return;
+      b.disabled = true;
+      await api(`/api/admin/dealers/${b.dataset.id}`, { method: 'PATCH', body: { status: b.dataset.status } });
+      render();
+    }),
+  );
+}
+
 // ---------- router ----------
 
 const home = () => (!me ? '#/' : me.role === 'dealer' ? '#/browse' : '#/my');
+const dealerBlocked = () => me.role === 'dealer' && me.status !== 'active';
 
 async function render() {
   const [path, search = ''] = location.hash.replace(/^#/, '').split('?');
@@ -443,6 +522,8 @@ async function render() {
   if (!me) return go('#/login');
 
   try {
+    if (me.isAdmin && path === '/admin') return await admin(params);
+    if (dealerBlocked()) return dealerNotApproved();
     const detail = path.match(/^\/request\/(\d+)$/);
     if (detail) return await requestDetail(detail[1]);
     if (me.role === 'user' && path === '/my') return await myRequests();

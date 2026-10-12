@@ -13,6 +13,8 @@ const SCHEMA = `
     role          TEXT NOT NULL CHECK (role IN ('user', 'dealer')),
     business_name TEXT,
     phone         TEXT,
+    -- Dealers start 'pending' until an admin approves them; buyers are 'active' right away.
+    status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'rejected')),
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -61,5 +63,16 @@ export function openDatabase(file) {
   if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+// Brings databases created by older versions of the app up to the current schema.
+function migrate(db) {
+  const columns = db.prepare('PRAGMA table_info(accounts)').all().map((c) => c.name);
+  if (!columns.includes('status')) {
+    // Dealers who signed up before approval existed stay active.
+    db.exec(`ALTER TABLE accounts ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
+      CHECK (status IN ('active', 'pending', 'rejected'))`);
+  }
 }

@@ -17,7 +17,11 @@ before(async () => {
     }
     sentEmails.push(email);
   };
-  server = createServer(createApp(openDatabase(':memory:'), { sendEmail, appUrl: 'https://cars.test' }));
+  server = createServer(createApp(openDatabase(':memory:'), {
+    sendEmail,
+    appUrl: 'https://cars.test',
+    adminEmails: ['Admin@test.com', ' ', 'boss@test.com'],
+  }));
   await new Promise((resolve) => server.listen(0, resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -40,7 +44,18 @@ function client() {
 }
 
 let n = 0;
-async function signup(role, extra = {}) {
+let adminClient;
+
+async function admin() {
+  if (!adminClient) {
+    adminClient = client();
+    await adminClient('POST', '/api/signup', { email: 'admin@test.com', password: 'password123', name: 'Ada Admin', role: 'user' });
+  }
+  return adminClient;
+}
+
+// Signs up an account. Dealers are approved by the admin unless { approve: false } is passed.
+async function signup(role, { approve = true, ...extra } = {}) {
   const call = client();
   const res = await call('POST', '/api/signup', {
     email: `${role}${++n}@test.com`,
@@ -51,6 +66,11 @@ async function signup(role, extra = {}) {
     ...extra,
   });
   assert.equal(res.status, 201, JSON.stringify(res.body));
+  call.account = res.body.account;
+  if (role === 'dealer' && approve) {
+    const approved = await (await admin())('PATCH', `/api/admin/dealers/${call.account.id}`, { status: 'active' });
+    assert.equal(approved.status, 200, JSON.stringify(approved.body));
+  }
   return call;
 }
 
@@ -207,4 +227,92 @@ test('buyer gets an email when a dealer responds', async () => {
   failNextEmail = true;
   const res = await dealer('POST', `/api/requests/${id}/responses`, { message: 'Second offer' });
   assert.equal(res.status, 201, 'email failure does not fail the response');
+});
+
+test('new dealers wait for admin approval before seeing requests', async () => {
+  const adminCall = await admin();
+  const buyer = await signup('user');
+  await buyer('POST', '/api/requests', { make: 'Lancia', model: 'Delta Integrale' });
+
+  sentEmails.length = 0;
+  const dealer = await signup('dealer', { approve: false, businessName: 'Rally Imports', email: 'rally@test.com', phone: '555-0111' });
+  assert.equal(dealer.account.status, 'pending');
+  assert.equal(dealer.account.isAdmin, false);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(sentEmails.map((e) => e.to).sort(), ['admin@test.com', 'boss@test.com'], 'every admin is told');
+  assert.match(sentEmails[0].subject, /Rally Imports/);
+  assert.match(sentEmails[0].text, /555-0111/);
+
+  // Pending dealers can log in but cannot see or answer requests.
+  assert.equal((await dealer('GET', '/api/me')).body.account.status, 'pending');
+  for (const path of ['/api/requests', '/api/makes', '/api/requests/1']) {
+    const res = await dealer('GET', path);
+    assert.equal(res.status, 403, path);
+    assert.match(res.body.error, /waiting for approval/);
+  }
+  assert.equal((await dealer('POST', '/api/requests/1/responses', { message: 'hi' })).status, 403);
+
+  // Only admins can see and manage dealers.
+  assert.equal((await buyer('GET', '/api/admin/dealers')).status, 403);
+  assert.equal((await client()('GET', '/api/admin/dealers')).status, 401);
+  assert.equal((await buyer('PATCH', `/api/admin/dealers/${dealer.account.id}`, { status: 'active' })).status, 403);
+
+  const pending = await adminCall('GET', '/api/admin/dealers');
+  assert.equal(pending.status, 200);
+  assert.ok(pending.body.dealers.some((d) => d.email === 'rally@test.com'));
+  assert.ok(pending.body.counts.pending >= 1);
+  assert.equal((await adminCall('GET', '/api/me')).body.account.isAdmin, true);
+  assert.equal((await adminCall('PATCH', `/api/admin/dealers/${buyer.account.id}`, { status: 'active' })).status, 404, 'buyers are not dealers');
+  assert.equal((await adminCall('PATCH', `/api/admin/dealers/${dealer.account.id}`, { status: 'bogus' })).status, 400);
+
+  // Approving lets them in and emails them.
+  sentEmails.length = 0;
+  assert.equal((await adminCall('PATCH', `/api/admin/dealers/${dealer.account.id}`, { status: 'active' })).body.dealer.status, 'active');
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(sentEmails.length, 1);
+  assert.equal(sentEmails[0].to, 'rally@test.com');
+  assert.match(sentEmails[0].subject, /approved/);
+  assert.equal((await dealer('GET', '/api/requests?q=Integrale')).body.total, 1);
+
+  // Revoking cuts access again, without another email.
+  sentEmails.length = 0;
+  await adminCall('PATCH', `/api/admin/dealers/${dealer.account.id}`, { status: 'rejected' });
+  const blocked = await dealer('GET', '/api/requests');
+  assert.equal(blocked.status, 403);
+  assert.match(blocked.body.error, /not approved/);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(sentEmails.length, 0);
+
+  const rejected = await adminCall('GET', '/api/admin/dealers?status=rejected');
+  assert.ok(rejected.body.dealers.some((d) => d.email === 'rally@test.com'));
+});
+
+test('an admin who signs up as a dealer is approved automatically', async () => {
+  const res = await client()('POST', '/api/signup', {
+    email: 'Boss@test.com', password: 'password123', name: 'Boss', role: 'dealer', businessName: 'Boss Cars',
+  });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.account.status, 'active');
+  assert.equal(res.body.account.isAdmin, true);
+});
+
+test('upgrading an existing database keeps existing dealers approved', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const file = `${mkdtempSync(`${tmpdir()}/cf-`)}/old.db`;
+
+  // The accounts table as it was before dealer approval existed.
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL,
+    name TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('user', 'dealer')), business_name TEXT, phone TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+  old.exec("INSERT INTO accounts (email, password_hash, name, role) VALUES ('old@dealer.com', 'x:y', 'Old', 'dealer')");
+  old.close();
+
+  const db = openDatabase(file);
+  assert.equal(db.prepare("SELECT status FROM accounts WHERE email = 'old@dealer.com'").get().status, 'active');
+  db.close();
+  openDatabase(file).close(); // running the migration twice is harmless
 });

@@ -19,6 +19,9 @@ services:
         value: production
       - key: DATABASE_FILE
         value: /var/data/car-finder.db
+      # Who can approve dealers: comma-separated emails of their Car Finder accounts (set in the dashboard).
+      - key: ADMIN_EMAILS
+        sync: false
       # Email alerts: paste your Resend API key in the Render dashboard (Environment tab).
       - key: RESEND_API_KEY
         sync: false

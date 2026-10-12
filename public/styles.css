@@ -108,3 +108,4 @@ dl.facts dd { margin: 0; }
 .response { border-left: 3px solid var(--accent); padding-left: 12px; }
 .empty { text-align: center; padding: 40px 16px; color: var(--muted); }
 .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+tbody tr.static { cursor: default; }

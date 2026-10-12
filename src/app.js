@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hashPassword, verifyPassword, newSessionToken } from './auth.js';
-import { newResponseEmail } from './email.js';
+import { newResponseEmail, newDealerEmail, dealerApprovedEmail } from './email.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 const MAX_BODY_BYTES = 64 * 1024;
@@ -88,8 +88,17 @@ function parseRequestFields(body) {
 
 // ---------- serializers ----------
 
-function publicAccount(a) {
-  return { id: a.id, email: a.email, name: a.name, role: a.role, businessName: a.business_name, phone: a.phone };
+function serializeDealer(a) {
+  return {
+    id: a.id,
+    email: a.email,
+    name: a.name,
+    businessName: a.business_name,
+    phone: a.phone,
+    status: a.status,
+    createdAt: a.created_at,
+    responseCount: a.response_count ?? undefined,
+  };
 }
 
 function serializeRequest(r) {
@@ -188,15 +197,46 @@ async function serveStatic(res, pathname) {
 
 // ---------- app ----------
 
-export function createApp(db, { secureCookies = false, sendEmail = async () => {}, appUrl = 'http://localhost:3000' } = {}) {
+const ACCOUNT_STATUSES = ['active', 'pending', 'rejected'];
+
+export function createApp(
+  db,
+  { secureCookies = false, sendEmail = async () => {}, appUrl = 'http://localhost:3000', adminEmails = [] } = {},
+) {
+  const admins = new Set(adminEmails.map((e) => e.trim().toLowerCase()).filter(Boolean));
+  const isAdmin = (account) => admins.has(account.email.toLowerCase());
+
+  function publicAccount(a) {
+    return {
+      id: a.id,
+      email: a.email,
+      name: a.name,
+      role: a.role,
+      businessName: a.business_name,
+      phone: a.phone,
+      status: a.status,
+      isAdmin: isAdmin(a),
+    };
+  }
+
+  // Emails go out after the HTTP reply, so a slow or failing provider never blocks or breaks a request.
+  function notify(email) {
+    sendEmail(email).catch((err) => console.error(`Failed to email ${email.to}:`, err.message));
+  }
+
   const q = {
     accountByEmail: db.prepare('SELECT * FROM accounts WHERE email = ?'),
     accountBySession: db.prepare(
       'SELECT a.* FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token = ?',
     ),
     insertAccount: db.prepare(
-      'INSERT INTO accounts (email, password_hash, name, role, business_name, phone) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO accounts (email, password_hash, name, role, business_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
     ),
+    dealersByStatus: db.prepare(`
+      SELECT a.*, (SELECT COUNT(*) FROM responses x WHERE x.dealer_id = a.id) AS response_count
+      FROM accounts a WHERE a.role = 'dealer' AND a.status = ? ORDER BY a.created_at DESC, a.id DESC`),
+    dealerCounts: db.prepare("SELECT status, COUNT(*) AS n FROM accounts WHERE role = 'dealer' GROUP BY status"),
+    setAccountStatus: db.prepare('UPDATE accounts SET status = ? WHERE id = ?'),
     accountById: db.prepare('SELECT * FROM accounts WHERE id = ?'),
     insertSession: db.prepare('INSERT INTO sessions (token, account_id) VALUES (?, ?)'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
@@ -241,6 +281,19 @@ export function createApp(db, { secureCookies = false, sendEmail = async () => {
     const account = currentAccount(req);
     if (!account) throw new HttpError(401, 'Please log in');
     if (role && account.role !== role) throw new HttpError(403, `Only ${role}s can do that`);
+    if (account.role === 'dealer') requireApproved(account);
+    return account;
+  }
+
+  function requireApproved(account) {
+    if (account.status === 'pending') throw new HttpError(403, 'Your dealer account is waiting for approval');
+    if (account.status === 'rejected') throw new HttpError(403, 'Your dealer account was not approved');
+  }
+
+  function requireAdmin(req) {
+    const account = currentAccount(req);
+    if (!account) throw new HttpError(401, 'Please log in');
+    if (!isAdmin(account)) throw new HttpError(403, 'Admins only');
     return account;
   }
 
@@ -339,9 +392,14 @@ export function createApp(db, { secureCookies = false, sendEmail = async () => {
       const phone = str(body.phone, 'Phone', { max: 40 });
       if (q.accountByEmail.get(email)) throw new HttpError(409, 'An account with that email already exists');
 
-      const { lastInsertRowid } = q.insertAccount.run(email, hashPassword(password), name, role, businessName, phone);
+      const status = role === 'dealer' && !admins.has(email) ? 'pending' : 'active';
+      const { lastInsertRowid } = q.insertAccount.run(email, hashPassword(password), name, role, businessName, phone, status);
       const account = q.accountById.get(lastInsertRowid);
       startSession(res, account.id, 201, { account: publicAccount(account) });
+
+      if (status === 'pending') {
+        for (const to of admins) notify(newDealerEmail({ dealer: account, to, appUrl }));
+      }
     }],
 
     ['POST', /^\/api\/login$/, async (req, res) => {
@@ -415,10 +473,28 @@ export function createApp(db, { secureCookies = false, sendEmail = async () => {
       const { lastInsertRowid } = q.insertResponse.run(request.id, account.id, message, price);
       const response = q.responseById.get(lastInsertRowid);
       sendJson(res, 201, { response: serializeResponse(response) });
+      notify(newResponseEmail({ request, response, dealer: account, buyer: q.accountById.get(request.user_id), appUrl }));
+    }],
 
-      // Alert the buyer. Sent after replying so a slow or failing email never blocks the dealer.
-      const email = newResponseEmail({ request, response, dealer: account, buyer: q.accountById.get(request.user_id), appUrl });
-      sendEmail(email).catch((err) => console.error(`Failed to email ${email.to}:`, err.message));
+    // --- admin ---
+
+    ['GET', /^\/api\/admin\/dealers$/, async (req, res, _m, url) => {
+      requireAdmin(req);
+      const status = oneOf(url.searchParams.get('status') || undefined, 'status', ACCOUNT_STATUSES, 'pending');
+      const counts = Object.fromEntries(ACCOUNT_STATUSES.map((s) => [s, 0]));
+      for (const row of q.dealerCounts.all()) counts[row.status] = row.n;
+      sendJson(res, 200, { status, counts, dealers: q.dealersByStatus.all(status).map(serializeDealer) });
+    }],
+
+    ['PATCH', /^\/api\/admin\/dealers\/(\d+)$/, async (req, res, [id]) => {
+      requireAdmin(req);
+      const dealer = q.accountById.get(Number(id));
+      if (!dealer || dealer.role !== 'dealer') throw new HttpError(404, 'Dealer not found');
+      const status = oneOf((await readJson(req)).status, 'Status', ACCOUNT_STATUSES, null);
+      if (!status) throw new HttpError(400, 'Status is required');
+      q.setAccountStatus.run(status, dealer.id);
+      sendJson(res, 200, { dealer: serializeDealer(q.accountById.get(dealer.id)) });
+      if (status === 'active' && dealer.status !== 'active') notify(dealerApprovedEmail({ dealer, appUrl }));
     }],
 
     // --- shared ---
