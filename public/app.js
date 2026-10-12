@@ -107,23 +107,92 @@ function renderNav() {
 
 // ---------- views ----------
 
+// Illustrative requests for the homepage (not real listings).
+const EXAMPLE_REQUESTS = [
+  {
+    title: '1973 Porsche 911 Carrera RS 2.7',
+    tags: ['Lightweight (M471)', 'Grand Prix White, blue script', 'Matching numbers'],
+    budget: 'up to $1,600,000',
+    where: 'Greenwich, CT',
+  },
+  {
+    title: '2004 BMW M3 CSL',
+    tags: ['Silver Grey', 'Under 30k miles', 'Full BMW history'],
+    budget: 'up to $185,000',
+    where: 'Scottsdale, AZ',
+  },
+  {
+    title: '2018 Porsche 911 GT3 Touring',
+    tags: ['6-speed manual', 'Paint to Sample preferred', 'No track use'],
+    budget: 'up to $210,000',
+    where: 'Miami, FL',
+  },
+];
+
+const MARQUES = ['Porsche', 'BMW M', 'Mercedes-AMG', 'Ferrari', 'Lamborghini', 'McLaren', 'Aston Martin', 'Lotus', 'Audi Sport', 'Acura NSX', 'Land Rover Defender'];
+
 function landing() {
   view.innerHTML = `
-    <section class="hero">
-      <h1>Tell us the car. The right dealers find it.</h1>
-      <p>For 911s, M cars, special editions and the ones you've been chasing for years. Post the exact spec you want — a 1987 Carrera in Guards Red, a 6&#8209;speed E46 M3 in Laguna Seca Blue, a GT3 Touring — and vetted specialty dealers come to you.</p>
-      <div class="split">
-        <div class="card">
-          <h2>I'm hunting for a car</h2>
-          <p class="muted">Describe the spec down to the gearbox and paint. Get offers from specialists who have it or can source it.</p>
-          <a class="button" href="#/signup?role=user">Post a request</a>
+    <section class="hero-band">
+      <div class="hero-inner">
+        <div class="hero-copy">
+          <p class="eyebrow">For 911s, M cars &amp; the special ones</p>
+          <h1>Tell us the car.<br>The right dealers <span>find it.</span></h1>
+          <p class="lede">Post the exact spec you've been chasing — gearbox, paint, options, provenance — and vetted specialty dealers who have it, or can source it, come to you.</p>
+          <div class="row">
+            <a class="button big" href="#/signup?role=user">Post a request — it's free</a>
+            <a class="button big ghost" href="#/signup?role=dealer">I'm a dealer</a>
+          </div>
         </div>
-        <div class="card">
-          <h2>I'm a specialty dealer</h2>
-          <p class="muted">See what serious enthusiasts are looking for right now. Respond with what you have and a price.</p>
-          <a class="button" href="#/signup?role=dealer">Browse requests</a>
+        <div class="hero-cards" aria-label="Example requests">
+          ${EXAMPLE_REQUESTS.map(
+            (r, i) => `
+            <div class="spec-card" style="--i:${i}">
+              <div class="spec-top"><span class="spec-label">Wanted</span><span class="spec-budget">${r.budget}</span></div>
+              <div class="spec-title">${r.title}</div>
+              <div class="spec-tags">${r.tags.map((t) => `<span>${t}</span>`).join('')}</div>
+              <div class="spec-where">${r.where}</div>
+            </div>`,
+          ).join('')}
+          <p class="spec-note">Example requests</p>
         </div>
       </div>
+      <div class="marques">${MARQUES.map((m) => `<span>${m}</span>`).join('')}</div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">How it works</h2>
+      <div class="steps">
+        <div class="step"><span class="step-n">1</span><h3>Post the exact spec</h3><p class="muted">Years, trim, gearbox, color, mileage, budget, must-haves. The more specific, the better the matches.</p></div>
+        <div class="step"><span class="step-n">2</span><h3>Specialists see it</h3><p class="muted">Only dealers we've reviewed can see requests, and they get an alert the moment yours matches what they sell.</p></div>
+        <div class="step"><span class="step-n">3</span><h3>Compare offers, deal direct</h3><p class="muted">Get offers with prices and photos by email. Reach out to the dealers you like — no middleman, no fees.</p></div>
+      </div>
+    </section>
+
+    <section class="section audiences">
+      <div class="card audience">
+        <h2>For enthusiasts</h2>
+        <ul class="checks">
+          <li>Stop refreshing listings — let the cars come to you</li>
+          <li>Your email and phone stay private; dealers only see your first name</li>
+          <li>Offers arrive with prices and photos</li>
+        </ul>
+        <a class="button" href="#/signup?role=user">Post a request</a>
+      </div>
+      <div class="card audience">
+        <h2>For specialty dealers</h2>
+        <ul class="checks">
+          <li>See exactly what serious buyers want, right now</li>
+          <li>Alerts for the makes you specialize in</li>
+          <li>Respond with a price and photos in a minute</li>
+        </ul>
+        <a class="button" href="#/signup?role=dealer">Apply as a dealer</a>
+      </div>
+    </section>
+
+    <section class="cta-band">
+      <h2>What are you hunting for?</h2>
+      <a class="button big" href="#/signup?role=user">Post your first request</a>
     </section>`;
 }
 

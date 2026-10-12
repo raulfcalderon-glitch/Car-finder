@@ -51,7 +51,7 @@ export function newResponseEmail({ request, response, dealer, buyer, appUrl, pho
         <p>Hi ${esc(buyer.name.split(/\s+/)[0])},</p>
         <p><strong>${esc(dealerName)}</strong> responded to your request for a <strong>${esc(vehicle)}</strong>.</p>
         ${response.price != null ? `<p style="font-size:18px">Asking price: <strong>${esc(money(response.price))}</strong></p>` : ''}
-        <blockquote style="margin:0;padding:8px 14px;border-left:3px solid #b3261e;background:#f6f7f9;white-space:pre-wrap">${esc(response.message)}</blockquote>
+        <blockquote style="margin:0;padding:8px 14px;border-left:3px solid #c8102e;background:#f6f7f9;white-space:pre-wrap">${esc(response.message)}</blockquote>
         ${
           photoUrls.length
             ? `<p>${photoUrls
@@ -68,7 +68,7 @@ export function newResponseEmail({ request, response, dealer, buyer, appUrl, pho
 }
 
 const button = (href, label) =>
-  `<a href="${esc(href)}" style="display:inline-block;background:#b3261e;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">${esc(label)}</a>`;
+  `<a href="${esc(href)}" style="display:inline-block;background:#c8102e;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">${esc(label)}</a>`;
 
 const wrap = (body) =>
   `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;color:#1b1f24;line-height:1.5">${body}</div>`;
@@ -185,7 +185,7 @@ export function newRequestAlertEmail({ dealer, request, link, settingsLink, unsu
       <table style="border-collapse:collapse;margin:12px 0">${facts
         .map(([k, v]) => `<tr><td style="color:#5f6b7a;padding:2px 16px 2px 0">${esc(k)}</td><td>${esc(v)}</td></tr>`)
         .join('')}</table>
-      ${request.notes ? `<blockquote style="margin:0 0 12px;padding:8px 14px;border-left:3px solid #b3261e;background:#f6f7f9;white-space:pre-wrap">${esc(request.notes)}</blockquote>` : ''}
+      ${request.notes ? `<blockquote style="margin:0 0 12px;padding:8px 14px;border-left:3px solid #c8102e;background:#f6f7f9;white-space:pre-wrap">${esc(request.notes)}</blockquote>` : ''}
       <p>${button(link, 'View and respond')}</p>
       <p style="color:#5f6b7a;font-size:13px"><a href="${esc(settingsLink)}" style="color:#5f6b7a">Change which requests you hear about</a> · <a href="${esc(unsubscribeLink)}" style="color:#5f6b7a">Unsubscribe</a><br>— CarsFindMe</p>`),
   };
