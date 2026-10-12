@@ -391,3 +391,18 @@ fieldset.stack .makes-field input { width: 100%; }
   .reveal { opacity: 1; transform: none; transition: none; }
   .button.big:hover, .step.in:hover, .audience.in:hover { transform: none; }
 }
+
+/* make / model autocomplete */
+label:has(> .suggestions), .make-field label { position: relative; }
+.suggestions {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 20; margin: 4px 0 0; padding: 4px; list-style: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 28px rgba(0, 0, 0, .14);
+  max-height: 260px; overflow-y: auto; font-weight: 400;
+}
+.suggestions li { padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.suggestions li:hover, .suggestions li.active { background: var(--bg); color: var(--accent); }
+.did-you-mean {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--warn); background: var(--bg);
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: .92rem;
+}
+.grid-2:has(.make-field) { align-items: start; }

@@ -15,6 +15,7 @@ import {
   contactEmail,
 } from './email.js';
 import { createLimiter } from './ratelimit.js';
+import { normalizeMake } from '../public/vehicles.js';
 import {
   CHECKS,
   DEALER_TYPES,
@@ -103,7 +104,7 @@ const MAX_YEAR = new Date().getFullYear() + 2;
 
 function parseRequestFields(body) {
   const fields = {
-    make: str(body.make, 'Make', { required: true, max: 60 }),
+    make: standardMake(str(body.make, 'Make', { required: true, max: 60 })),
     model: str(body.model, 'Model', { required: true, max: 80 }),
     trim: str(body.trim, 'Trim', { max: 80 }),
     year_min: int(body.yearMin, 'Minimum year', { min: 1885, max: MAX_YEAR }),
@@ -118,6 +119,20 @@ function parseRequestFields(body) {
     throw new HttpError(400, 'Minimum year cannot be after maximum year');
   }
   return fields;
+}
+
+// "porsche", "PORSCHE" and "Porsche " are all saved as "Porsche"; "VW" as "Volkswagen". Unknown makes are kept as typed.
+function standardMake(make) {
+  return make && (normalizeMake(make) ?? make);
+}
+
+// Brings requests saved before makes were standardised in line (runs at startup; cheap and repeatable).
+function standardizeExistingMakes(db) {
+  const update = db.prepare('UPDATE requests SET make = ? WHERE make = ?');
+  for (const { make } of db.prepare('SELECT DISTINCT make FROM requests').all()) {
+    const standard = standardMake(make);
+    if (standard !== make) update.run(standard, make);
+  }
 }
 
 // What a dealer tells us about their business when they apply.
@@ -408,6 +423,7 @@ export function createApp(
     }
     if (count) for (const [name, key] of checks) limiter[name].hit(key);
   }
+  standardizeExistingMakes(db);
   const admins = new Set(adminEmails.map((e) => e.trim().toLowerCase()).filter(Boolean));
   const isAdmin = (account) => admins.has(account.email.toLowerCase());
 
@@ -443,9 +459,10 @@ export function createApp(
     if (mode === 'off') return false;
     if (minBudget != null && request.max_budget != null && request.max_budget < minBudget) return false;
     if (mode === 'makes') {
-      // Loose match so "Mercedes" also catches "Mercedes-Benz", and "BMW" catches "bmw".
-      const make = request.make.trim().toLowerCase();
-      return makes.some((m) => make === m || make.includes(m) || m.includes(make));
+      // Compare standard names ("vw" → volkswagen) by family, so Mercedes-Benz also catches Mercedes-AMG.
+      const family = (name) => standardMake(name.trim()).toLowerCase().split(/[- ]/)[0];
+      const make = family(request.make);
+      return makes.some((m) => family(m) === make);
     }
     return true;
   }
@@ -837,7 +854,10 @@ export function createApp(
       text.split(/\s+/).slice(0, 8).forEach((word, i) => {
         where.push(`(r.make LIKE :w${i} ESCAPE '\\' OR r.model LIKE :w${i} ESCAPE '\\' OR r.trim LIKE :w${i} ESCAPE '\\'
           OR r.color LIKE :w${i} ESCAPE '\\' OR r.location LIKE :w${i} ESCAPE '\\' OR r.notes LIKE :w${i} ESCAPE '\\'
-          OR :y${i} BETWEEN COALESCE(r.year_min, r.year_max) AND COALESCE(r.year_max, r.year_min))`);
+          OR :y${i} BETWEEN COALESCE(r.year_min, r.year_max) AND COALESCE(r.year_max, r.year_min)
+          OR r.make = :m${i} COLLATE NOCASE)`);
+        // "vw" or "chevy" also finds Volkswagen or Chevrolet requests.
+        args[`m${i}`] = normalizeMake(word) ?? '';
         args[`w${i}`] = `%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
         // A 4-digit word like "1987" also matches any request whose year range covers it.
         args[`y${i}`] = /^\d{4}$/.test(word) ? Number(word) : -1;
@@ -1007,8 +1027,9 @@ export function createApp(
       const makes = [
         ...new Set(
           (Array.isArray(body.makes) ? body.makes : String(body.makes ?? '').split(','))
-            .map((m) => String(m).trim().toLowerCase())
-            .filter(Boolean),
+            .map((m) => String(m).trim())
+            .filter(Boolean)
+            .map((m) => standardMake(m).toLowerCase()),
         ),
       ];
       if (makes.length > 30 || makes.some((m) => m.length > 40)) throw new HttpError(400, 'Too many makes');

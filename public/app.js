@@ -1,4 +1,5 @@
 import { TERMS_HTML, PRIVACY_HTML, LEGAL_UPDATED, CONTACT_EMAIL } from './legal.js';
+import { normalizeMake, suggestMake, matchMakes, matchModels } from './vehicles.js';
 
 const view = document.getElementById('view');
 const banner = document.getElementById('banner');
@@ -796,8 +797,11 @@ function requestForm({ initial = {}, edit = null, prefilled = false } = {}) {
       }
       <form>
         <div class="grid-2">
-          <label>Make <input name="make" placeholder="Porsche" required ${v('make')}></label>
-          <label>Model <input name="model" placeholder="911 Carrera" required ${v('model')}></label>
+          <div class="make-field">
+            <label>Make <input name="make" placeholder="Porsche" required autocomplete="off" ${v('make')}></label>
+            <div class="did-you-mean" id="did-you-mean" hidden></div>
+          </div>
+          <label>Model <input name="model" placeholder="911 Carrera" required autocomplete="off" ${v('model')}></label>
           <label>Year from <input name="yearMin" type="number" min="1885" max="${thisYear + 2}" placeholder="1987" ${v('yearMin')}></label>
           <label>Year to <input name="yearMax" type="number" min="1885" max="${thisYear + 2}" placeholder="1987" ${v('yearMax')}></label>
           <label>Trim / variant <input name="trim" placeholder="Targa, G50 gearbox, Sport Seats" ${v('trim')}></label>
@@ -817,7 +821,10 @@ function requestForm({ initial = {}, edit = null, prefilled = false } = {}) {
         <div class="row"><button type="submit">${edit ? 'Save changes' : 'Post request'}</button><a href="${edit ? edit.cancelHref : '#/my'}">Cancel</a></div>
       </form>
     </div>`;
-  bindForm(view.querySelector('form'), async (data) => {
+  const form = view.querySelector('form');
+  const makeCheck = setupMakeField(form);
+  bindForm(form, async (data) => {
+    if (makeCheck.pending()) throw new Error('Please check the make above — tap the suggestion or keep what you typed.');
     if (edit) {
       await api(`/api/admin/requests/${edit.id}`, { method: 'PATCH', body: data });
       return go(edit.cancelHref);
@@ -825,6 +832,125 @@ function requestForm({ initial = {}, edit = null, prefilled = false } = {}) {
     const { request } = await api('/api/requests', { method: 'POST', body: data });
     storage('take');
     go(`#/request/${request.id}`);
+  });
+}
+
+// ---------- make & model helpers ----------
+
+// "porshe 911" found nothing → offer "porsche 911".
+function didYouMeanSearch(q) {
+  if (!q) return '';
+  let changed = false;
+  const fixed = q.split(/\s+/).map((word) => {
+    const suggestion = suggestMake(word);
+    if (!suggestion) return word;
+    changed = true;
+    return suggestion;
+  });
+  if (!changed) return '';
+  const next = new URLSearchParams({ q: fixed.join(' ') });
+  return ` Did you mean <a href="#/browse?${next}">${esc(fixed.join(' '))}</a>?`;
+}
+
+// Autocomplete for the make and model inputs, plus a "Did you mean …?" prompt for likely typos.
+function setupMakeField(form) {
+  const make = form.make;
+  const model = form.model;
+  const prompt = form.querySelector('#did-you-mean');
+  let kept = null; // a make the person chose to keep even though we didn't recognise it
+
+  attachSuggestions(make, (text) => matchMakes(text), () => check());
+  attachSuggestions(model, (text) => matchModels(make.value, text));
+
+  function check() {
+    const typed = make.value.trim();
+    const standard = normalizeMake(typed);
+    if (standard) {
+      make.value = standard; // "porsche" → "Porsche", "vw" → "Volkswagen"
+      return hide();
+    }
+    const suggestion = typed && typed !== kept ? suggestMake(typed) : null;
+    if (!suggestion) return hide();
+    prompt.innerHTML = `<span>Did you mean <strong>${esc(suggestion)}</strong>?</span>
+      <button type="button" class="small" data-use>Yes, use ${esc(suggestion)}</button>
+      <button type="button" class="secondary small" data-keep>No, keep “${esc(typed)}”</button>`;
+    prompt.hidden = false;
+    prompt.querySelector('[data-use]').addEventListener('click', () => {
+      make.value = suggestion;
+      hide();
+      model.focus();
+    });
+    prompt.querySelector('[data-keep]').addEventListener('click', () => {
+      kept = typed;
+      hide();
+    });
+  }
+  function hide() {
+    prompt.hidden = true;
+  }
+  make.addEventListener('change', check);
+  return { pending: () => (check(), !prompt.hidden) };
+}
+
+// A small dropdown of suggestions under an input. Typing anything else is always allowed.
+function attachSuggestions(input, getOptions, onPick = () => {}) {
+  const list = document.createElement('ul');
+  list.className = 'suggestions';
+  list.setAttribute('role', 'listbox');
+  list.hidden = true;
+  input.after(list);
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-expanded', 'false');
+  let options = [];
+  let active = -1;
+
+  const close = () => {
+    list.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    active = -1;
+  };
+  const draw = () => {
+    list.innerHTML = options
+      .map((o, i) => `<li role="option" data-i="${i}" class="${i === active ? 'active' : ''}" aria-selected="${i === active}">${esc(o)}</li>`)
+      .join('');
+    list.hidden = !options.length;
+    input.setAttribute('aria-expanded', String(!list.hidden));
+  };
+  const open = () => {
+    options = getOptions(input.value).filter((o) => o.toLowerCase() !== input.value.trim().toLowerCase() || input.value === '');
+    active = -1;
+    draw();
+  };
+  const pick = (i) => {
+    input.value = options[i];
+    close();
+    onPick();
+  };
+
+  input.addEventListener('input', open);
+  input.addEventListener('focus', open);
+  input.addEventListener('blur', () => setTimeout(close, 150));
+  input.addEventListener('keydown', (e) => {
+    if (list.hidden) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      active = (active + (e.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+      draw();
+    } else if (e.key === 'Enter' && active >= 0) {
+      e.preventDefault();
+      pick(active);
+    } else if (e.key === 'Escape') {
+      close();
+    }
+  });
+  // mousedown (not click) so it fires before the input loses focus
+  list.addEventListener('mousedown', (e) => {
+    const li = e.target.closest('li');
+    if (li) {
+      e.preventDefault();
+      pick(Number(li.dataset.i));
+    }
   });
 }
 
@@ -977,7 +1103,7 @@ async function browse(params) {
             <span class="muted">${result.offset + 1}–${result.offset + result.requests.length} of ${result.total}</span>
             <button class="secondary" data-page="1" ${result.offset + result.requests.length >= result.total ? 'disabled' : ''}>Next →</button>
           </div>`
-        : `<div class="card empty">No requests match those filters.</div>`
+        : `<div class="card empty">No requests match those filters.${didYouMeanSearch(state.q)}</div>`
     }`;
 
   const update = (changes) => {

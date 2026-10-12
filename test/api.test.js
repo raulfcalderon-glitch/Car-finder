@@ -673,7 +673,7 @@ test('dealers get new-request alerts that match their settings', async () => {
 
   assert.deepEqual((await everything('GET', '/api/me')).body.account.alerts, { mode: 'all', makes: [], minBudget: null });
   assert.equal((await porscheOnly('PUT', '/api/me/alerts', { mode: 'makes', makes: 'Porsche, porsche , Mercedes' })).status, 200);
-  assert.deepEqual((await porscheOnly('GET', '/api/me')).body.account.alerts.makes, ['porsche', 'mercedes']);
+  assert.deepEqual((await porscheOnly('GET', '/api/me')).body.account.alerts.makes, ['porsche', 'mercedes-benz'], 'saved as standard makes');
   await bigTicket('PUT', '/api/me/alerts', { mode: 'all', minBudget: 100000 });
   await muted('PUT', '/api/me/alerts', { mode: 'off' });
   assert.equal((await porscheOnly('PUT', '/api/me/alerts', { mode: 'makes', makes: '' })).status, 400);
@@ -1012,4 +1012,36 @@ test('the contact form emails admins, stores the message and resists spam', asyn
   // And there's a per-address limit (5 an hour); 2 real ones were sent above.
   for (let i = 0; i < 3; i++) assert.equal((await send(visitor, valid)).status, 201);
   assert.equal((await send(visitor, valid)).status, 429);
+});
+
+test('makes are saved under one standard spelling, and search understands nicknames', async () => {
+  const buyer = await signup('user');
+  const dealer = await signup('dealer');
+  const post = async (make) => (await buyer('POST', '/api/requests', { make, model: `Std ${make}` })).body.request;
+
+  assert.equal((await post('porsche')).make, 'Porsche');
+  assert.equal((await post('VW')).make, 'Volkswagen');
+  assert.equal((await post('mercedes benz')).make, 'Mercedes-Benz');
+  assert.equal((await post('Zagato')).make, 'Zagato');
+  assert.equal((await post('Some Garage Special')).make, 'Some Garage Special', 'unknown makes are kept as typed');
+  assert.equal((await post('Porshe')).make, 'Porshe', 'typos are not silently changed; the form asks instead');
+
+  // Admin edits are standardized too.
+  const r = await post('Ferrari');
+  const edited = await (await admin())('PATCH', `/api/admin/requests/${r.id}`, { make: 'lambo' });
+  assert.equal(edited.body.request.make, 'Lamborghini');
+
+  // Dealers can search by nickname.
+  const found = await dealer('GET', '/api/requests?q=vw&status=all');
+  assert.ok(found.body.requests.some((x) => x.model === 'Std VW'));
+});
+
+test('existing requests are cleaned up when the app starts', async () => {
+  const db = openDatabase(':memory:');
+  db.exec("INSERT INTO accounts (email, password_hash, name, role) VALUES ('u@x.com', 'x:y', 'U', 'user')");
+  for (const make of ['porsche', 'PORSCHE', 'chevy', 'Unknown Make']) {
+    db.prepare("INSERT INTO requests (user_id, make, model) VALUES (1, ?, 'X')").run(make);
+  }
+  createApp(db);
+  assert.deepEqual(db.prepare('SELECT make FROM requests ORDER BY id').all().map((r) => r.make), ['Porsche', 'Porsche', 'Chevrolet', 'Unknown Make']);
 });

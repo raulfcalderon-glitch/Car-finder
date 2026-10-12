@@ -11,6 +11,7 @@ A two-sided marketplace for enthusiast cars — 911s, BMW M cars, special editio
 - **Profiles:** everyone can upload a profile picture (center-cropped to a square in the browser); without one, a colored circle shows up to two initials (business name for dealers). Dealers' pictures show on their responses, buyers' on their requests.
 - **Reports:** buyers can report a dealer's response (deposit/wire request, misleading, conduct, spam, other) once per response; admins get an email and a **Reports** tab to review and resolve, and each dealer's page lists its reports.
 - **Homepage:** animated hero, example request cards, a live ticker of recent requests, scroll-in sections, and a quick-start box ("What are you hunting for?") that pre-fills the request form (through signup for visitors). Motion is turned off for reduced-motion users. A **Contact us** page sends messages to admins.
+- **Makes & models:** `public/vehicles.js` is a shared catalog (~140 enthusiast makes with nicknames like VW, Chevy, Merc; model suggestions for ~45 makes). The request form autocompletes make and model and asks "Did you mean Porsche?" for likely typos; the server saves known makes under one standard spelling (and fixes older requests at startup), and dealer search, filters and alerts use the standard names.
 - Buyers get an **email alert** when a dealer responds, and see each response with the dealer's contact details. Dealers only see a buyer's first name and only their own responses, not competitors'.
 
 ## Run it
@@ -47,6 +48,7 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 - `src/auth.js` – scrypt password hashing and session tokens (HttpOnly cookie).
 - `src/email.js` – emails (alerts, confirmations, password resets) via Resend's HTTP API.
 - `src/ratelimit.js` – in-memory limits on login attempts and outgoing account emails.
+- `public/vehicles.js` – make/model catalog, make standardization and typo suggestions (used by both browser and server).
 - `src/verification.js` – dealer verification rules: required checks, the Verified badge, email-domain signal.
 - `public/` – the single-page front end in plain HTML/CSS/JS.
 - `test/` – API tests using `node:test`.
