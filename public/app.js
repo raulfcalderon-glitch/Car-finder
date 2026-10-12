@@ -127,8 +127,8 @@ function navItems() {
   const items =
     me.role === 'dealer'
       ? me.status === 'active'
-        ? [['#/browse', 'Requests'], ['#/responses', 'My responses'], ['#/dealer-profile', 'My profile'], ['#/alerts', 'Alerts']]
-        : [['#/dealer-profile', 'My profile'], ['#/alerts', 'Alerts']]
+        ? [['#/browse', 'Requests'], ['#/responses', 'My responses']]
+        : []
       : [['#/my', 'My requests'], ['#/new', 'New request']];
   if (me.isAdmin) items.push(['#/admin', 'Admin']);
   return items;
@@ -161,8 +161,11 @@ function renderNav() {
           </div>
         </div>
         <div class="menu-links menu-mobile">${links}</div>
-        <a href="#/profile" role="menuitem">${me.role === 'dealer' ? 'Logo &amp; account' : 'Profile &amp; photo'}</a>
-        <a href="#/" role="menuitem">Home</a>
+        ${
+          me.role === 'dealer'
+            ? '<a href="#/dealer-profile" role="menuitem">My profile</a><a href="#/alerts" role="menuitem">Alerts</a>'
+            : '<a href="#/profile" role="menuitem">Profile &amp; photo</a>'
+        }
         <a href="#/contact" role="menuitem">Contact us</a>
         <button type="button" id="logout" role="menuitem">Log out</button>
       </div>
@@ -1767,9 +1770,24 @@ async function editDealerProfile() {
         ${p.public ? '' : '<br><strong>It goes public once your dealer account is approved.</strong>'}</p>
 
       <section class="card">
-        <h2>Cover photo</h2>
+        <h2>Logo &amp; cover photo</h2>
+        <div class="profile-row">
+          <div id="profile-avatar">${avatar(me, 96)}</div>
+          <div>
+            <strong class="profile-name">${esc(displayName(me))}</strong>
+            <div class="muted">${esc(me.name)} · ${esc(me.email)}</div>
+            <p class="hint">Your logo or photo appears on your responses and your profile. Without one, we show your initials.</p>
+            <div class="row">
+              <label class="button secondary small" for="avatar-input">${me.avatarUrl ? 'Change logo' : 'Upload logo'}</label>
+              <input id="avatar-input" type="file" accept="image/*" hidden>
+              ${me.avatarUrl ? '<button type="button" class="secondary small" id="avatar-remove">Remove</button>' : ''}
+            </div>
+            <p class="error" id="avatar-error"></p>
+          </div>
+        </div>
+        <h3 class="subhead">Cover photo</h3>
         <div class="dealer-cover small"${p.coverUrl ? ` style="background-image:url('${esc(p.coverUrl)}')"` : ''}></div>
-        <p class="hint">A wide photo of your showroom or a car you're proud of. Your logo is your <a href="#/profile">profile photo</a>.</p>
+        <p class="hint">A wide photo of your showroom or a car you're proud of.</p>
         <div class="row">
           <label class="button secondary small" for="cover-input">${p.coverUrl ? 'Change cover' : 'Upload cover'}</label>
           <input id="cover-input" type="file" accept="image/*" hidden>
@@ -1860,6 +1878,25 @@ async function editDealerProfile() {
     if (input.value.trim()) addChip();
     await api('/api/me/profile', { method: 'PUT', body: { ...data, specialties } });
     view.querySelector('#saved').textContent = 'Saved ✓';
+  });
+
+  view.querySelector('#avatar-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    view.querySelector('#profile-avatar').innerHTML = '<span class="muted">Uploading…</span>';
+    try {
+      me = (await api('/api/me/avatar', { method: 'PUT', body: { photo: await squarePhoto(file) } })).account;
+      renderNav();
+      editDealerProfile();
+    } catch (err) {
+      view.querySelector('#avatar-error').textContent = err.message.includes('Failed to') ? "Couldn't read that image. Try a JPEG or PNG." : err.message;
+      view.querySelector('#profile-avatar').innerHTML = avatar(me, 96);
+    }
+  });
+  view.querySelector('#avatar-remove')?.addEventListener('click', async () => {
+    me = (await api('/api/me/avatar', { method: 'DELETE' })).account;
+    renderNav();
+    editDealerProfile();
   });
 
   const cover = view.querySelector('#cover-input');
@@ -2507,7 +2544,7 @@ async function render() {
   try {
     if (me.isAdmin && path === '/admin') return await admin(params);
     if (me.role === 'dealer' && path === '/alerts') return alertSettingsPage();
-    if (path === '/profile') return profilePage();
+    if (path === '/profile') return me.role === 'dealer' ? go('#/dealer-profile') : profilePage();
     if (me.role === 'dealer' && path === '/dealer-profile') return await editDealerProfile();
     const adminDetail = path.match(/^\/admin\/account\/(\d+)$/);
     if (me.isAdmin && adminDetail) return await adminAccount(adminDetail[1]);
