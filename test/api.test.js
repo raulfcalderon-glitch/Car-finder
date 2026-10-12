@@ -8,6 +8,7 @@ let server;
 let base;
 let testDb;
 let uploadsDir;
+let app;
 const sentEmails = [];
 let failNextEmail = false;
 
@@ -23,7 +24,7 @@ before(async () => {
   const { mkdtempSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   uploadsDir = mkdtempSync(`${tmpdir()}/cf-uploads-`);
-  server = createServer(createApp(testDb, {
+  server = createServer(app = createApp(testDb, {
     sendEmail,
     appUrl: 'https://cars.test',
     adminEmails: ['Admin@test.com', ' ', 'boss@test.com'],
@@ -1044,4 +1045,156 @@ test('existing requests are cleaned up when the app starts', async () => {
   }
   createApp(db);
   assert.deepEqual(db.prepare('SELECT make FROM requests ORDER BY id').all().map((r) => r.make), ['Porsche', 'Porsche', 'Chevrolet', 'Unknown Make']);
+});
+
+const daysFromNow = (sqlDate) => (new Date(`${sqlDate.replace(' ', 'T')}Z`) - Date.now()) / 86400000;
+const setExpiry = (id, modifier) => testDb.prepare("UPDATE requests SET expires_at = datetime('now', ?) WHERE id = ?").run(modifier, id);
+
+test('requests close themselves after 60 days, with a reminder and one-click renewal', async () => {
+  const buyer = await signup('user');
+  const dealer = await signup('dealer');
+  const { request } = (await buyer('POST', '/api/requests', { make: 'Porsche', model: 'Expiry 993' })).body;
+  assert.ok(Math.abs(daysFromNow(request.expiresAt) - 60) < 0.1, 'new requests are open for 60 days');
+  const email = buyer.account.email;
+  const emailsTo = (subject) => sentEmails.filter((e) => e.to === email && e.subject.includes(subject));
+
+  // A week out, the buyer gets one reminder (not one per run).
+  setExpiry(request.id, '+5 days');
+  app.runMaintenance();
+  app.runMaintenance();
+  await tick();
+  assert.equal(emailsTo('Still looking').length, 1);
+  assert.match(emailsTo('Still looking')[0].text, /Expiry 993/);
+
+  // The email link keeps it open for another 60 days, without signing in.
+  const token = await tokenFromEmail(email, 'renew');
+  const renewed = await client()('POST', '/api/requests/renew', { token });
+  assert.equal(renewed.status, 200, JSON.stringify(renewed.body));
+  assert.ok(Math.abs(daysFromNow(renewed.body.request.expiresAt) - 60) < 0.1);
+  assert.equal(renewed.body.request.make, 'Porsche');
+  assert.equal(renewed.body.request.notes, undefined, 'the anonymous link reveals only the vehicle');
+  assert.equal((await client()('POST', '/api/requests/renew', { token: 'nope' })).status, 404);
+
+  // Once past its date it closes, dealers can't respond, and the buyer is told.
+  setExpiry(request.id, '-1 minutes');
+  assert.deepEqual(app.runMaintenance(), { reminded: 0, expired: 1 });
+  await tick();
+  const closed = (await buyer('GET', `/api/requests/${request.id}`)).body.request;
+  assert.equal(closed.status, 'closed');
+  assert.equal(closed.expired, true);
+  assert.equal(emailsTo('has closed').length, 1);
+  assert.equal((await dealer('POST', `/api/requests/${request.id}/responses`, { message: 'Too late?' })).status, 409);
+  assert.ok(!(await dealer('GET', '/api/requests?q=expiry')).body.requests.some((r) => r.id === request.id));
+
+  // The same link reopens an expired request…
+  assert.equal((await client()('POST', '/api/requests/renew', { token })).status, 200);
+  assert.equal((await buyer('GET', `/api/requests/${request.id}`)).body.request.status, 'open');
+
+  // …but not one the buyer closed on purpose.
+  await buyer('PATCH', `/api/requests/${request.id}`, { status: 'fulfilled' });
+  assert.equal((await client()('POST', '/api/requests/renew', { token })).status, 409);
+
+  // Reopening by hand gives a fresh 60 days, so it doesn't expire again right away.
+  setExpiry(request.id, '-3 days');
+  const reopened = (await buyer('PATCH', `/api/requests/${request.id}`, { status: 'open' })).body.request;
+  assert.ok(Math.abs(daysFromNow(reopened.expiresAt) - 60) < 0.1);
+
+  // The buyer can extend from the request page; nobody else can.
+  setExpiry(request.id, '+3 days');
+  assert.equal((await (await signup('user'))('POST', `/api/requests/${request.id}/renew`)).status, 403);
+  const extended = await buyer('POST', `/api/requests/${request.id}/renew`);
+  assert.ok(Math.abs(daysFromNow(extended.body.request.expiresAt) - 60) < 0.1);
+});
+
+test('requests from before expiry existed get at least two more weeks', async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const file = `${mkdtempSync(`${tmpdir()}/cf-db-`)}/old.db`;
+  const db = openDatabase(file);
+  db.exec("INSERT INTO accounts (email, password_hash, name, role) VALUES ('u@x.com', 'x:y', 'U', 'user')");
+  db.exec(`INSERT INTO requests (user_id, make, model, created_at) VALUES
+    (1, 'Porsche', 'Old', datetime('now', '-90 days')), (1, 'Porsche', 'Recent', datetime('now', '-10 days'))`);
+  db.close();
+  const reopened = openDatabase(file);
+  const [old, recent] = reopened.prepare('SELECT expires_at FROM requests ORDER BY id').all();
+  assert.ok(Math.abs(daysFromNow(old.expires_at) - 14) < 0.1);
+  assert.ok(Math.abs(daysFromNow(recent.expires_at) - 50) < 0.1);
+});
+
+test('buyers can mark responses Interested or Not for me, and dealers see it', async () => {
+  const buyer = await signup('user');
+  const dealer = await signup('dealer');
+  const { request } = (await buyer('POST', '/api/requests', { make: 'BMW', model: 'Feedback M3' })).body;
+  const { response } = (await dealer('POST', `/api/requests/${request.id}/responses`, { message: 'Have one', price: 50000 })).body;
+  const feedback = (body, who = buyer) => who('PUT', `/api/responses/${response.id}/feedback`, body);
+
+  assert.equal((await feedback({ feedback: 'interested' }, await signup('user'))).status, 404, "only the request's owner");
+  assert.equal((await feedback({ feedback: 'interested' }, dealer)).status, 403);
+  assert.equal((await feedback({ feedback: 'maybe' })).status, 400);
+
+  const interested = await feedback({ feedback: 'interested' });
+  assert.equal(interested.status, 200, JSON.stringify(interested.body));
+  assert.equal(interested.body.response.feedback, 'interested');
+  await tick();
+  const note = sentEmails.find((e) => e.to === dealer.account.email && e.subject.includes('is interested'));
+  assert.ok(note, 'dealer is emailed');
+  assert.ok(!note.text.includes(buyer.account.email), "the buyer's email isn't shared");
+
+  const passed = await feedback({ feedback: 'not_for_me', reason: 'price' });
+  assert.equal(passed.body.response.feedbackReasonLabel, 'Price is too high');
+  assert.equal((await feedback({ feedback: 'not_for_me', reason: 'bogus' })).status, 400);
+
+  // The dealer sees the reaction on the request and on their responses list.
+  const seen = (await dealer('GET', `/api/requests/${request.id}`)).body.responses[0];
+  assert.equal(seen.feedback, 'not_for_me');
+  const mine = (await dealer('GET', '/api/my/responses')).body.responses;
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].feedbackReasonLabel, 'Price is too high');
+  assert.equal(mine[0].request.model, 'Feedback M3');
+  assert.equal((await buyer('GET', '/api/my/responses')).status, 403);
+
+  assert.equal((await feedback({ feedback: null })).body.response.feedback, null, 'the buyer can clear it');
+});
+
+test('dealers can edit or withdraw their own responses', async () => {
+  const buyer = await signup('user');
+  const dealer = await signup('dealer');
+  const other = await signup('dealer');
+  const { request } = (await buyer('POST', '/api/requests', { make: 'Ferrari', model: 'Edit F40' })).body;
+  const { response } = (await dealer('POST', `/api/requests/${request.id}/responses`, { message: 'Have one', price: 2_000_000 })).body;
+
+  assert.equal((await other('PATCH', `/api/responses/${response.id}`, { price: 1 })).status, 404);
+  assert.equal((await other('DELETE', `/api/responses/${response.id}`)).status, 404);
+  assert.equal((await dealer('PATCH', `/api/responses/${response.id}`, { message: '' })).status, 400);
+
+  const edited = await dealer('PATCH', `/api/responses/${response.id}`, { price: 1_900_000 });
+  assert.equal(edited.status, 200, JSON.stringify(edited.body));
+  assert.equal(edited.body.response.price, 1_900_000);
+  assert.equal(edited.body.response.message, 'Have one', 'unchanged fields stay');
+  assert.ok(edited.body.response.updatedAt);
+
+  const withdrawn = await dealer('DELETE', `/api/responses/${response.id}`);
+  assert.equal(withdrawn.body.response.withdrawn, true);
+  assert.equal((await dealer('PATCH', `/api/responses/${response.id}`, { price: 1 })).status, 409);
+  assert.equal((await dealer('DELETE', `/api/responses/${response.id}`)).status, 409);
+
+  // The buyer still sees it, marked withdrawn, but it no longer counts and can't get feedback.
+  const view = (await buyer('GET', `/api/requests/${request.id}`)).body;
+  assert.equal(view.responses[0].withdrawn, true);
+  assert.equal(view.request.responseCount, 0);
+  assert.equal((await buyer('PUT', `/api/responses/${response.id}/feedback`, { feedback: 'interested' })).status, 409);
+
+  // Edits are only allowed while the request is open.
+  const second = (await other('POST', `/api/requests/${request.id}/responses`, { message: 'Me too' })).body.response;
+  await buyer('PATCH', `/api/requests/${request.id}`, { status: 'closed' });
+  assert.equal((await other('PATCH', `/api/responses/${second.id}`, { price: 5 })).status, 409);
+});
+
+test('link previews: the share image and tags are served', async () => {
+  const image = await fetch(`${base}/og-image.png`);
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get('content-type'), 'image/png');
+  const html = await (await fetch(`${base}/`)).text();
+  assert.match(html, /<meta property="og:image" content="https:\/\/carsfindme.com\/og-image.png">/);
+  assert.match(html, /twitter:card" content="summary_large_image"/);
 });

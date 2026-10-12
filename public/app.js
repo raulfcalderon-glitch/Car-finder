@@ -41,6 +41,19 @@ function ago(sqlDate) {
   return then.toLocaleDateString();
 }
 
+const sqlTime = (sqlDate) => new Date(`${sqlDate.replace(' ', 'T')}Z`).getTime();
+const shortDate = (sqlDate) => new Date(sqlTime(sqlDate)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+const daysLeft = (sqlDate) => Math.max(0, Math.ceil((sqlTime(sqlDate) - Date.now()) / 86400000));
+
+// "closes in 5 days" for open requests, "expired" for ones that closed themselves.
+function expiryPill(r) {
+  if (r.status === 'open' && r.expiresAt) {
+    const d = daysLeft(r.expiresAt);
+    return d <= 7 ? ` <span class="pill closed">closes ${d <= 1 ? 'tomorrow' : `in ${d} days`}</span>` : '';
+  }
+  return r.expired ? ' <span class="pill fulfilled">expired</span>' : '';
+}
+
 async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(path, {
     method,
@@ -114,7 +127,7 @@ function navItems() {
   const items =
     me.role === 'dealer'
       ? me.status === 'active'
-        ? [['#/browse', 'Requests'], ['#/alerts', 'Alerts']]
+        ? [['#/browse', 'Requests'], ['#/responses', 'My responses'], ['#/alerts', 'Alerts']]
         : [['#/alerts', 'Alerts']]
       : [['#/my', 'My requests'], ['#/new', 'New request']];
   if (me.isAdmin) items.push(['#/admin', 'Admin']);
@@ -1011,7 +1024,7 @@ async function myRequests() {
             <a class="card request-card" href="#/request/${r.id}">
               <div class="row spread">
                 <span class="vehicle">${esc(vehicleTitle(r))}</span>
-                <span>${r.hidden ? '<span class="pill closed">hidden</span> ' : ''}<span class="pill ${r.status}">${r.status}</span></span>
+                <span>${r.hidden ? '<span class="pill closed">hidden</span> ' : ''}<span class="pill ${r.status}">${r.status}</span>${expiryPill(r)}</span>
               </div>
               <div class="muted">${esc(years(r))} · ${money(r.maxBudget)} · ${esc(CONDITION_LABELS[r.condition])} · posted ${ago(r.createdAt)}</div>
               <div><strong>${r.responseCount}</strong> dealer ${r.responseCount === 1 ? 'response' : 'responses'}</div>
@@ -1136,54 +1149,12 @@ async function requestDetail(id) {
   const isAdminView = viewer === 'admin';
   const seesContacts = isOwner || isAdminView;
 
+  const requestOpen = r.status === 'open';
+  // Buyers see the offers they're weighing first, then ones they passed on, then withdrawn ones.
+  const rank = (x) => (x.withdrawn ? 3 : x.feedback === 'not_for_me' ? 2 : x.feedback === 'interested' ? 0 : 1);
+  const ordered = isOwner ? [...responses].sort((a, b) => rank(a) - rank(b)) : responses;
   const responseHtml = responses.length
-    ? responses
-        .map(
-          (x) => `
-        <div class="card response">
-          <div class="row spread">
-            <strong class="with-avatar">${avatar({ ...x.dealer, role: 'dealer' }, 40)}<span>${esc(x.dealer.businessName || x.dealer.name)}</span>${x.dealer.verified ? verifiedBadge(x.dealer.type) : ''}${
-              isAdminView ? ` <a class="muted" href="#/admin/account/${x.dealer.id}">view dealer</a>` : ''
-            }${x.dealerFrozen ? ' <span class="pill closed">frozen — hidden from buyer</span>' : ''}</strong>
-            <span class="muted">${ago(x.createdAt)}</span>
-          </div>
-          ${x.price != null ? `<div>Asking: <strong>${money(x.price)}</strong></div>` : ''}
-          <p style="white-space:pre-wrap">${esc(x.message)}</p>
-          ${
-            x.photos?.length
-              ? `<div class="photo-grid">${x.photos
-                  .map((src, i) => `<a href="${esc(src)}" target="_blank" rel="noopener"><img src="${esc(src)}" alt="Photo ${i + 1}" loading="lazy"></a>`)
-                  .join('')}</div>`
-              : ''
-          }
-          ${
-            seesContacts
-              ? `<div class="muted">Contact: ${esc(x.dealer.name)} · <a href="mailto:${esc(x.dealer.email)}">${esc(x.dealer.email)}</a>${
-                  x.dealer.phone ? ` · <a href="tel:${esc(x.dealer.phone)}">${esc(x.dealer.phone)}</a>` : ''
-                }</div>`
-              : ''
-          }
-          ${
-            isOwner
-              ? x.reportedByMe
-                ? '<div class="report-row"><span class="muted">Reported — thanks, we\'re looking into it.</span></div>'
-                : `<div class="report-row"><button type="button" class="link-button" data-report="${x.id}">Report this dealer</button></div>
-                   <form class="report-form" data-report-form="${x.id}" hidden>
-                     <label>What happened?
-                       <select name="reason" required>
-                         <option value="">Choose a reason…</option>
-                         ${Object.entries(REPORT_REASONS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
-                       </select>
-                     </label>
-                     <label>Details <span class="hint">optional — anything that helps us check</span><textarea name="details" rows="3"></textarea></label>
-                     <p class="error"></p>
-                     <div class="row"><button type="submit">Send report</button><button type="button" class="secondary" data-report-cancel="${x.id}">Cancel</button></div>
-                   </form>`
-              : ''
-          }
-        </div>`,
-        )
-        .join('')
+    ? ordered.map((x) => responseCard(x, { isOwner, isAdminView, isDealerView: viewer === 'dealer', requestOpen })).join('')
     : `<div class="card empty">${
         isOwner ? 'No dealer responses yet. Check back soon.' : isAdminView ? 'No responses yet.' : "You haven't responded to this request yet."
       }</div>`;
@@ -1233,6 +1204,14 @@ async function requestDetail(id) {
           : ''
       }
       ${isOwner && r.hidden ? '<p class="frozen-note">This request has been hidden from dealers by CarsFindMe. Contact us if you have questions.</p>' : ''}
+      ${
+        seesContacts && requestOpen && r.expiresAt
+          ? `<p class="expiry-note">Open until <strong>${shortDate(r.expiresAt)}</strong>. Requests close by themselves after 60 days so dealers only see buyers who are still looking${
+              isOwner ? '; we\'ll email you a week before.' : '.'
+            }${isOwner && daysLeft(r.expiresAt) <= 14 ? ' <button class="small" id="renew">Keep it open 60 more days</button>' : ''}</p>`
+          : ''
+      }
+      ${seesContacts && r.expired ? '<p class="expiry-note">This request closed by itself after 60 days. Reopen it if you\'re still looking.</p>' : ''}
       ${seesContacts ? `<div class="row">${isAdminView ? '<span class="muted">Status:</span>' : ''}${statusButtons(r.status)}</div>` : ''}
       ${
         isAdminView
@@ -1245,7 +1224,7 @@ async function requestDetail(id) {
           : ''
       }
     </div>
-    <h2 style="margin-top:24px">${seesContacts ? `Dealer responses (${responses.length})` : 'Your responses'}</h2>
+    <h2 style="margin-top:24px">${seesContacts ? `Dealer responses (${responses.filter((x) => !x.withdrawn).length})` : 'Your responses'}</h2>
     ${
       isOwner && responses.length
         ? '<p class="safety-tip"><strong>Stay safe:</strong> never wire money or pay a deposit before you\'ve seen the car (or had it inspected) and checked the title. If a dealer pressures you to pay up front, please report them.</p>'
@@ -1323,6 +1302,12 @@ async function requestDetail(id) {
       render();
     }),
   );
+  view.querySelector('#renew')?.addEventListener('click', async () => {
+    await api(`/api/requests/${r.id}/renew`, { method: 'POST' });
+    render();
+  });
+  bindResponseActions(responses);
+
   const form = view.querySelector('#response-form');
   if (form) {
     const photos = []; // shrunk data URLs, in the order they'll be sent
@@ -1358,6 +1343,204 @@ async function requestDetail(id) {
       await api(`/api/requests/${r.id}/responses`, { method: 'POST', body: { ...data, photos } });
       render();
     });
+  }
+}
+
+const FEEDBACK_REASONS = {
+  price: 'Price is too high',
+  spec: 'Not the right spec, color or options',
+  condition: 'Condition, mileage or history',
+  found: 'Found one elsewhere',
+  other: 'Something else',
+};
+
+// What the buyer thought, as the dealer (and admins) see it.
+function feedbackPill(x) {
+  if (x.withdrawn) return '<span class="pill fulfilled">withdrawn</span>';
+  if (x.feedback === 'interested') return '<span class="pill open">buyer is interested</span>';
+  if (x.feedback === 'not_for_me') return `<span class="pill closed">buyer passed${x.feedbackReasonLabel ? `: ${esc(x.feedbackReasonLabel.toLowerCase())}` : ''}</span>`;
+  return '';
+}
+
+function responseCard(x, { isOwner, isAdminView, isDealerView, requestOpen }) {
+  const seesContacts = isOwner || isAdminView;
+  const passed = isOwner && x.feedback === 'not_for_me';
+  const edited = x.updatedAt ? ` · edited ${ago(x.updatedAt)}` : '';
+  return `
+    <div class="card response${x.withdrawn || passed ? ' dimmed' : ''}${isOwner && x.feedback === 'interested' ? ' interested' : ''}" data-response="${x.id}">
+      <div class="row spread">
+        <strong class="with-avatar">${avatar({ ...x.dealer, role: 'dealer' }, 40)}<span>${esc(x.dealer.businessName || x.dealer.name)}</span>${x.dealer.verified ? verifiedBadge(x.dealer.type) : ''}${
+          isAdminView ? ` <a class="muted" href="#/admin/account/${x.dealer.id}">view dealer</a>` : ''
+        }${x.dealerFrozen ? ' <span class="pill closed">frozen — hidden from buyer</span>' : ''}</strong>
+        <span class="muted">${ago(x.createdAt)}${edited}</span>
+      </div>
+      ${
+        x.withdrawn
+          ? `<p class="withdrawn-note">${isOwner ? `Withdrawn by the dealer ${ago(x.withdrawnAt)}, usually because the car sold.` : `You withdrew this ${ago(x.withdrawnAt)}.`}</p>`
+          : ''
+      }
+      ${!isOwner && !x.withdrawn && (isDealerView || isAdminView) ? `<div class="feedback-status">${feedbackPill(x) || '<span class="muted">No reaction from the buyer yet</span>'}</div>` : ''}
+      ${x.price != null ? `<div>Asking: <strong>${money(x.price)}</strong></div>` : ''}
+      <p style="white-space:pre-wrap">${esc(x.message)}</p>
+      ${
+        x.photos?.length
+          ? `<div class="photo-grid">${x.photos
+              .map((src, i) => `<a href="${esc(src)}" target="_blank" rel="noopener"><img src="${esc(src)}" alt="Photo ${i + 1}" loading="lazy"></a>`)
+              .join('')}</div>`
+          : ''
+      }
+      ${
+        seesContacts
+          ? `<div class="muted">Contact: ${esc(x.dealer.name)} · <a href="mailto:${esc(x.dealer.email)}">${esc(x.dealer.email)}</a>${
+              x.dealer.phone ? ` · <a href="tel:${esc(x.dealer.phone)}">${esc(x.dealer.phone)}</a>` : ''
+            }</div>`
+          : ''
+      }
+      ${isOwner && !x.withdrawn ? feedbackControls(x) : ''}
+      ${
+        isDealerView && !x.withdrawn
+          ? `<div class="row response-actions">
+              ${requestOpen ? `<button type="button" class="secondary small" data-edit="${x.id}">Edit</button>` : ''}
+              <button type="button" class="secondary small" data-withdraw="${x.id}">Withdraw</button>
+            </div>
+            <form class="edit-response" data-edit-form="${x.id}" hidden>
+              <label>Asking price (USD) <span class="hint">optional</span><input name="price" type="number" min="0" step="500" value="${x.price ?? ''}"></label>
+              <label>Message <textarea name="message" required>${esc(x.message)}</textarea></label>
+              <p class="error"></p>
+              <div class="row"><button type="submit">Save changes</button><button type="button" class="secondary" data-edit-cancel="${x.id}">Cancel</button></div>
+            </form>`
+          : ''
+      }
+      ${
+        isOwner
+          ? x.reportedByMe
+            ? '<div class="report-row"><span class="muted">Reported — thanks, we\'re looking into it.</span></div>'
+            : `<div class="report-row"><button type="button" class="link-button" data-report="${x.id}">Report this dealer</button></div>
+               <form class="report-form" data-report-form="${x.id}" hidden>
+                 <label>What happened?
+                   <select name="reason" required>
+                     <option value="">Choose a reason…</option>
+                     ${Object.entries(REPORT_REASONS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+                   </select>
+                 </label>
+                 <label>Details <span class="hint">optional — anything that helps us check</span><textarea name="details" rows="3"></textarea></label>
+                 <p class="error"></p>
+                 <div class="row"><button type="submit">Send report</button><button type="button" class="secondary" data-report-cancel="${x.id}">Cancel</button></div>
+               </form>`
+          : ''
+      }
+    </div>`;
+}
+
+// Buyer's "Interested / Not for me" buttons. The dealer sees the answer, never the buyer's contact details.
+function feedbackControls(x) {
+  const on = (v) => (x.feedback === v ? ' active' : '');
+  return `
+    <div class="feedback" data-feedback-for="${x.id}">
+      <span class="muted">Let the dealer know:</span>
+      <button type="button" class="chip${on('interested')}" data-feedback="interested" aria-pressed="${x.feedback === 'interested'}">Interested</button>
+      <button type="button" class="chip${on('not_for_me')}" data-feedback="not_for_me" aria-pressed="${x.feedback === 'not_for_me'}">Not for me</button>
+      ${
+        x.feedback === 'not_for_me'
+          ? `<select class="feedback-reason" aria-label="Why not? (optional)">
+              <option value="">Why not? (optional)</option>
+              ${Object.entries(FEEDBACK_REASONS).map(([v, l]) => `<option value="${v}"${x.feedbackReason === v ? ' selected' : ''}>${l}</option>`).join('')}
+            </select>`
+          : ''
+      }
+      ${x.feedback === 'interested' ? '<span class="hint">We let the dealer know. Reach out using their contact details above.</span>' : ''}
+    </div>`;
+}
+
+function bindResponseActions(responses) {
+  const byId = Object.fromEntries(responses.map((x) => [x.id, x]));
+  const sendFeedback = async (id, feedback, reason) => {
+    await api(`/api/responses/${id}/feedback`, { method: 'PUT', body: { feedback, reason } });
+    render();
+  };
+  view.querySelectorAll('[data-feedback-for]').forEach((box) => {
+    const id = Number(box.dataset.feedbackFor);
+    box.querySelectorAll('[data-feedback]').forEach((b) =>
+      // Tapping the active choice again clears it.
+      b.addEventListener('click', () => sendFeedback(id, byId[id].feedback === b.dataset.feedback ? null : b.dataset.feedback)),
+    );
+    box.querySelector('.feedback-reason')?.addEventListener('change', (e) => sendFeedback(id, 'not_for_me', e.target.value || null));
+  });
+
+  view.querySelectorAll('[data-edit]').forEach((b) =>
+    b.addEventListener('click', () => {
+      view.querySelector(`[data-edit-form="${b.dataset.edit}"]`).hidden = false;
+      b.closest('.response-actions').hidden = true;
+    }),
+  );
+  view.querySelectorAll('[data-edit-cancel]').forEach((b) =>
+    b.addEventListener('click', () => {
+      view.querySelector(`[data-edit-form="${b.dataset.editCancel}"]`).hidden = true;
+      view.querySelector(`[data-response="${b.dataset.editCancel}"] .response-actions`).hidden = false;
+    }),
+  );
+  view.querySelectorAll('[data-edit-form]').forEach((f) =>
+    bindForm(f, async (data) => {
+      await api(`/api/responses/${f.dataset.editForm}`, { method: 'PATCH', body: { message: data.message, price: data.price } });
+      render();
+    }),
+  );
+  view.querySelectorAll('[data-withdraw]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      if (!confirm("Withdraw this response?\n\nUse this if the car sold or is no longer available. The buyer will see it marked as withdrawn, and you can't undo this.")) return;
+      await api(`/api/responses/${b.dataset.withdraw}`, { method: 'DELETE' });
+      render();
+    }),
+  );
+}
+
+// Dealer: every response they've sent, with the buyer's reaction.
+async function myResponses() {
+  const { responses } = await api('/api/my/responses');
+  const counts = {
+    interested: responses.filter((x) => !x.withdrawn && x.feedback === 'interested').length,
+    passed: responses.filter((x) => !x.withdrawn && x.feedback === 'not_for_me').length,
+  };
+  view.innerHTML = `
+    <h1>My responses</h1>
+    ${
+      responses.length
+        ? `<p class="muted">${responses.length} sent · ${counts.interested} interested · ${counts.passed} passed. Buyers can mark your response <strong>Interested</strong> or <strong>Not for me</strong>, and you'll see why here.</p>
+          <div class="list">${responses
+            .map(
+              (x) => `
+            <a class="card request-card${x.withdrawn ? ' dimmed' : ''}" href="#/request/${x.request.id}">
+              <div class="row spread">
+                <span class="vehicle">${esc(vehicleTitle(x.request))}</span>
+                <span><span class="pill ${x.request.status}">${x.request.status}</span> ${feedbackPill(x)}</span>
+              </div>
+              <div class="muted">${x.price != null ? `Your price ${money(x.price)} · ` : ''}buyer's budget ${money(x.request.maxBudget)} · sent ${ago(x.createdAt)}${x.updatedAt ? ` · edited ${ago(x.updatedAt)}` : ''}</div>
+              <div class="muted clamp">${esc(x.message)}</div>
+            </a>`,
+            )
+            .join('')}</div>`
+        : '<div class="card empty">You haven\'t responded to any requests yet. <a href="#/browse">Browse requests</a>.</div>'
+    }`;
+}
+
+// One-click "still looking" link from the reminder email.
+async function renewPage(params) {
+  view.innerHTML = '<div class="card narrow"><p>Keeping your request open…</p></div>';
+  try {
+    const { request } = await api('/api/requests/renew', { method: 'POST', body: { token: params.get('token') } });
+    view.innerHTML = `
+      <div class="card narrow">
+        <h1>You're all set</h1>
+        <p>Your request for a <strong>${esc(vehicleTitle(request))}</strong> is open until <strong>${shortDate(request.expiresAt)}</strong>. Dealers will keep seeing it.</p>
+        <a class="button" href="${me ? `#/request/${request.id}` : '#/login'}">${me ? 'See your request' : 'Log in'}</a>
+      </div>`;
+  } catch (err) {
+    view.innerHTML = `
+      <div class="card narrow">
+        <h1>Couldn't keep it open</h1>
+        <p>${esc(err.message)}</p>
+        <a class="button" href="${me ? '#/my' : '#/login'}">${me ? 'My requests' : 'Log in'}</a>
+      </div>`;
   }
 }
 
@@ -1736,7 +1919,7 @@ async function adminAccount(id) {
           <tbody>${responses
             .map(
               (x) => `<tr data-href="#/request/${x.requestId}">
-                <td><strong>${esc(vehicleTitle(x.request))}</strong><br><span class="pill ${x.request.status}">${x.request.status}</span></td>
+                <td><strong>${esc(vehicleTitle(x.request))}</strong><br><span class="pill ${x.request.status}">${x.request.status}</span> ${feedbackPill(x)}</td>
                 <td>${money(x.price)}</td>
                 <td class="wrap muted">${esc(x.message.slice(0, 160))}</td>
                 <td>${ago(x.createdAt)}</td>
@@ -1923,6 +2106,7 @@ async function render() {
     '/verify': verifyEmailPage,
     '/reset': resetPassword,
     '/unsubscribe': unsubscribePage,
+    '/renew': renewPage,
     '/signup': signup,
     '/contact': contactPage,
   };
@@ -1952,6 +2136,7 @@ async function render() {
     if (me.role === 'user' && path === '/my') return await myRequests();
     if (me.role === 'user' && path === '/new') return newRequestPage();
     if (me.role === 'dealer' && path === '/browse') return await browse(params);
+    if (me.role === 'dealer' && path === '/responses') return await myResponses();
     go(home());
   } catch (err) {
     if (err.status === 401) {

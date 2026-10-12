@@ -406,3 +406,22 @@ label:has(> .suggestions), .make-field label { position: relative; }
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: .92rem;
 }
 .grid-2:has(.make-field) { align-items: start; }
+
+/* request expiry, buyer feedback and dealer edits */
+.expiry-note { color: var(--muted); font-size: .9rem; margin: 12px 0 4px; }
+.expiry-note button { margin-left: 6px; }
+.response.dimmed, .request-card.dimmed { opacity: .62; }
+.response.dimmed:hover, .request-card.dimmed:hover { opacity: 1; }
+.response.interested { border-left-color: var(--ok); }
+.withdrawn-note { margin: 8px 0; font-weight: 600; color: var(--muted); }
+.feedback-status { margin: 6px 0; }
+.feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.feedback .hint { flex-basis: 100%; }
+.chip { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 5px 14px; font-size: .88rem; font-weight: 600; }
+.chip:hover { border-color: var(--text); }
+.chip.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+.chip.active[data-feedback="interested"] { background: var(--ok); border-color: var(--ok); color: #fff; }
+.feedback-reason { width: auto; padding: 5px 8px; font-size: .88rem; }
+.response-actions { margin-top: 10px; }
+.edit-response { margin-top: 10px; }
+.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

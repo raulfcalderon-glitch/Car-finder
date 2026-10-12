@@ -13,7 +13,11 @@ import {
   newRequestAlertEmail,
   dealerReportEmail,
   contactEmail,
+  requestExpiringEmail,
+  requestExpiredEmail,
+  responseInterestEmail,
 } from './email.js';
+import { REQUEST_LIFETIME_DAYS, REMINDER_DAYS_BEFORE } from './db.js';
 import { createLimiter } from './ratelimit.js';
 import { normalizeMake } from '../public/vehicles.js';
 import {
@@ -63,6 +67,7 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.png': 'image/png',
   '.ico': 'image/x-icon',
 };
 
@@ -235,6 +240,8 @@ function serializeRequest(r) {
     notes: r.notes,
     status: r.status,
     hidden: Boolean(r.hidden_at),
+    expiresAt: r.expires_at,
+    expired: Boolean(r.expired_at),
     createdAt: r.created_at,
     // Dealers see only the buyer's first name; contact happens through responses.
     requesterName: r.requester_name ? String(r.requester_name).split(/\s+/)[0] : undefined,
@@ -251,6 +258,12 @@ function serializeResponse(r, photos = []) {
     message: r.message,
     price: r.price,
     createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    withdrawn: Boolean(r.withdrawn_at),
+    withdrawnAt: r.withdrawn_at,
+    feedback: r.feedback,
+    feedbackReason: r.feedback_reason,
+    feedbackReasonLabel: FEEDBACK_REASONS[r.feedback_reason],
     dealer: {
       id: r.dealer_id,
       name: r.dealer_name,
@@ -371,6 +384,16 @@ export const CONTACT_TOPICS = {
   dealer: 'Becoming a dealer',
   problem: 'Report a problem',
   partnership: 'Partnerships or press',
+  other: 'Something else',
+};
+
+// A buyer's reaction to a dealer's response, and why it wasn't right (shown to that dealer only).
+export const FEEDBACK = ['interested', 'not_for_me'];
+export const FEEDBACK_REASONS = {
+  price: 'Price is too high',
+  spec: 'Not the right spec, color or options',
+  condition: 'Condition, mileage or history',
+  found: 'Found one elsewhere',
   other: 'Something else',
 };
 
@@ -560,13 +583,43 @@ export function createApp(
     insertSession: db.prepare('INSERT INTO sessions (token, account_id) VALUES (?, ?)'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
     insertRequest: db.prepare(`
-      INSERT INTO requests (user_id, make, model, trim, year_min, year_max, max_budget, condition, color, location, notes)
-      VALUES (:user_id, :make, :model, :trim, :year_min, :year_max, :max_budget, :condition, :color, :location, :notes)`),
+      INSERT INTO requests (user_id, make, model, trim, year_min, year_max, max_budget, condition, color, location, notes, expires_at)
+      VALUES (:user_id, :make, :model, :trim, :year_min, :year_max, :max_budget, :condition, :color, :location, :notes,
+        datetime('now', '+${REQUEST_LIFETIME_DAYS} days'))`),
     updateRequest: db.prepare(`
       UPDATE requests SET make = :make, model = :model, trim = :trim, year_min = :year_min, year_max = :year_max,
         max_budget = :max_budget, condition = :condition, color = :color, location = :location, notes = :notes
       WHERE id = :id`),
-    updateStatus: db.prepare('UPDATE requests SET status = ? WHERE id = ?'),
+    updateStatus: db.prepare('UPDATE requests SET status = ?, expired_at = NULL WHERE id = ?'),
+    // Opens (or keeps open) a request for another full lifetime, and re-arms the reminder.
+    renewRequest: db.prepare(`
+      UPDATE requests SET status = 'open', expires_at = datetime('now', '+${REQUEST_LIFETIME_DAYS} days'),
+        reminded_at = NULL, expired_at = NULL
+      WHERE id = ?`),
+    requestByRenewToken: db.prepare('SELECT id FROM requests WHERE renew_token = ?'),
+    setRenewToken: db.prepare('UPDATE requests SET renew_token = ? WHERE id = ?'),
+    // Open requests closing within the reminder window whose buyer hasn't been reminded yet.
+    requestsToRemind: db.prepare(`
+      SELECT r.*, (SELECT COUNT(*) FROM visible_responses x WHERE x.request_id = r.id) AS response_count
+      FROM requests r JOIN accounts a ON a.id = r.user_id
+      WHERE r.status = 'open' AND r.reminded_at IS NULL AND a.frozen_at IS NULL
+        AND r.expires_at > datetime('now') AND r.expires_at <= datetime('now', '+${REMINDER_DAYS_BEFORE} days')`),
+    markReminded: db.prepare("UPDATE requests SET reminded_at = datetime('now') WHERE id = ?"),
+    requestsToExpire: db.prepare(`
+      SELECT r.*, a.frozen_at AS requester_frozen_at FROM requests r JOIN accounts a ON a.id = r.user_id
+      WHERE r.status = 'open' AND r.expires_at <= datetime('now')`),
+    expireRequest: db.prepare("UPDATE requests SET status = 'closed', expired_at = datetime('now') WHERE id = ?"),
+    setFeedback: db.prepare(`
+      UPDATE responses SET feedback = :feedback, feedback_reason = :reason,
+        feedback_at = CASE WHEN :feedback IS NULL THEN NULL ELSE datetime('now') END
+      WHERE id = :id`),
+    editResponse: db.prepare("UPDATE responses SET message = ?, price = ?, updated_at = datetime('now') WHERE id = ?"),
+    withdrawResponse: db.prepare("UPDATE responses SET withdrawn_at = datetime('now') WHERE id = ? AND withdrawn_at IS NULL"),
+    responsesByDealer: db.prepare(`
+      SELECT x.*, r.make, r.model, r.trim, r.year_min, r.year_max, r.max_budget, r.status AS request_status,
+        r.expires_at, r.expired_at, a.name AS requester_name
+      FROM responses x JOIN visible_requests r ON r.id = x.request_id JOIN accounts a ON a.id = r.user_id
+      WHERE x.dealer_id = ? ORDER BY x.created_at DESC, x.id DESC`),
     hideRequest: db.prepare("UPDATE requests SET hidden_at = datetime('now'), hidden_reason = ? WHERE id = ?"),
     unhideRequest: db.prepare('UPDATE requests SET hidden_at = NULL, hidden_reason = NULL WHERE id = ?'),
     deleteRequest: db.prepare('DELETE FROM requests WHERE id = ?'),
@@ -580,8 +633,8 @@ export function createApp(
     responsesForRequest: db.prepare(`
       SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar, a.dealer_type, a.license_number AS dealer_license_number,
         a.verification_checks AS dealer_checks, a.status AS dealer_status
-      FROM visible_responses x JOIN accounts a ON a.id = x.dealer_id
-      WHERE x.request_id = ? ORDER BY x.created_at ASC, x.id ASC`),
+      FROM responses x JOIN accounts a ON a.id = x.dealer_id
+      WHERE x.request_id = ? AND a.frozen_at IS NULL ORDER BY x.created_at ASC, x.id ASC`),
     responsesForRequestByDealer: db.prepare(`
       SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar, a.dealer_type, a.license_number AS dealer_license_number,
         a.verification_checks AS dealer_checks, a.status AS dealer_status
@@ -702,6 +755,58 @@ export function createApp(
     const row = q.requestById.get(id);
     if (!row) throw new HttpError(404, 'Request not found');
     return row;
+  }
+
+  // Reopening a closed request gives it a fresh lifetime, so it doesn't expire again right away.
+  function setRequestStatus(request, value) {
+    const status = oneOf(value, 'Status', STATUSES, request.status);
+    if (status === 'open' && request.status !== 'open') q.renewRequest.run(request.id);
+    else if (status !== request.status) q.updateStatus.run(status, request.id);
+  }
+
+  function renewToken(request) {
+    if (request.renew_token) return request.renew_token;
+    const token = newSessionToken();
+    q.setRenewToken.run(token, request.id);
+    return token;
+  }
+
+  // Runs on a timer (see server.js): reminds buyers a week before their request closes, then closes it.
+  function runMaintenance() {
+    const reminded = q.requestsToRemind.all();
+    for (const request of reminded) {
+      q.markReminded.run(request.id);
+      notify(
+        requestExpiringEmail({
+          buyer: q.accountById.get(request.user_id),
+          request,
+          responseCount: request.response_count,
+          renewLink: `${appUrl}/#/renew?token=${renewToken(request)}`,
+          link: `${appUrl}/#/request/${request.id}`,
+        }),
+      );
+    }
+    const expired = q.requestsToExpire.all();
+    for (const request of expired) {
+      q.expireRequest.run(request.id);
+      if (request.requester_frozen_at) continue;
+      notify(
+        requestExpiredEmail({
+          buyer: q.accountById.get(request.user_id),
+          request,
+          renewLink: `${appUrl}/#/renew?token=${renewToken(request)}`,
+        }),
+      );
+    }
+    return { reminded: reminded.length, expired: expired.length };
+  }
+
+  // A dealer's own response, for editing or withdrawing it.
+  function loadOwnResponse(account, id) {
+    const response = q.responseById.get(id);
+    if (!response || response.dealer_id !== account.id) throw new HttpError(404, 'Response not found');
+    if (response.withdrawn_at) throw new HttpError(409, 'You already withdrew this response');
+    return response;
   }
 
   // Hidden requests and those from frozen accounts don't exist as far as dealers are concerned.
@@ -1134,10 +1239,60 @@ export function createApp(
       if (Object.keys(body).some((k) => k !== 'status')) {
         q.updateRequest.run({ ...parseRequestFields({ ...toBodyShape(existing), ...body }), id: existing.id });
       }
-      if (body.status !== undefined) {
-        q.updateStatus.run(oneOf(body.status, 'Status', STATUSES, existing.status), existing.id);
-      }
+      if (body.status !== undefined) setRequestStatus(existing, body.status);
       sendJson(res, 200, { request: serializeRequest(loadRequest(existing.id)) });
+    }],
+
+    // Keep an open request open for another full lifetime (or reopen it).
+    ['POST', /^\/api\/requests\/(\d+)\/renew$/, async (req, res, [id]) => {
+      const account = requireAccount(req, 'user');
+      const existing = loadRequest(Number(id));
+      if (existing.user_id !== account.id) throw new HttpError(403, 'You can only renew your own requests');
+      q.renewRequest.run(existing.id);
+      sendJson(res, 200, { request: serializeRequest(loadRequest(existing.id)) });
+    }],
+
+    // One-click "still looking" link from the reminder email; works without signing in.
+    ['POST', /^\/api\/requests\/renew$/, async (req, res) => {
+      const token = String((await readJson(req)).token ?? '');
+      const found = token && q.requestByRenewToken.get(token);
+      if (!found) throw new HttpError(404, 'This link is no longer valid. Log in to manage your requests.');
+      const request = loadRequest(found.id);
+      // Only requests that are open or closed by expiry; ones the buyer closed stay closed.
+      if (request.status !== 'open' && !request.expired_at) {
+        throw new HttpError(409, 'You closed this request. Log in to reopen it from My requests.');
+      }
+      q.renewRequest.run(request.id);
+      const renewed = loadRequest(request.id);
+      sendJson(res, 200, {
+        request: { id: renewed.id, make: renewed.make, model: renewed.model, trim: renewed.trim, yearMin: renewed.year_min, yearMax: renewed.year_max, expiresAt: renewed.expires_at },
+      });
+    }],
+
+    // The buyer's reaction to a response: 'interested', 'not_for_me' (optional reason), or null to clear it.
+    ['PUT', /^\/api\/responses\/(\d+)\/feedback$/, async (req, res, [id]) => {
+      const account = requireAccount(req, 'user');
+      const response = q.responseById.get(Number(id));
+      const request = response && loadRequest(response.request_id);
+      if (!response || request.user_id !== account.id) throw new HttpError(404, 'Response not found');
+      if (response.withdrawn_at) throw new HttpError(409, 'The dealer withdrew this response');
+      const body = await readJson(req);
+      const feedback = oneOf(body.feedback, 'Feedback', FEEDBACK, null);
+      const reason = feedback === 'not_for_me' ? oneOf(body.reason, 'Reason', Object.keys(FEEDBACK_REASONS), null) : null;
+      q.setFeedback.run({ feedback, reason, id: response.id });
+      const updated = q.responseById.get(response.id);
+      sendJson(res, 200, { response: withPhotos(updated) });
+      if (feedback === 'interested' && response.feedback !== 'interested') {
+        notify(
+          responseInterestEmail({
+            dealer: q.accountById.get(response.dealer_id),
+            buyerFirstName: account.name.split(/\s+/)[0],
+            request,
+            response: updated,
+            link: `${appUrl}/#/request/${request.id}`,
+          }),
+        );
+      }
     }],
 
     // --- dealers ---
@@ -1177,6 +1332,44 @@ export function createApp(
           photoUrls: names.map((n) => `${appUrl}/uploads/${n}`),
         }),
       );
+    }],
+
+    // Every response this dealer has sent, with what the buyer thought of it.
+    ['GET', /^\/api\/my\/responses$/, async (req, res) => {
+      const account = requireAccount(req, 'dealer');
+      const responses = q.responsesByDealer.all(account.id).map((x) => ({
+        id: x.id,
+        message: x.message,
+        price: x.price,
+        createdAt: x.created_at,
+        updatedAt: x.updated_at,
+        withdrawn: Boolean(x.withdrawn_at),
+        feedback: x.feedback,
+        feedbackReasonLabel: FEEDBACK_REASONS[x.feedback_reason],
+        request: serializeRequest({ ...x, id: x.request_id, status: x.request_status, created_at: undefined }),
+      }));
+      sendJson(res, 200, { responses });
+    }],
+
+    // A dealer updates their message or price (e.g. a price drop). Only while the request is open.
+    ['PATCH', /^\/api\/responses\/(\d+)$/, async (req, res, [id]) => {
+      const account = requireAccount(req, 'dealer');
+      const response = loadOwnResponse(account, Number(id));
+      const request = loadRequest(response.request_id);
+      if (request.status !== 'open') throw new HttpError(409, 'This request is no longer open');
+      const body = await readJson(req);
+      const message = body.message === undefined ? response.message : str(body.message, 'Message', { required: true, max: 2000 });
+      const price = body.price === undefined ? response.price : int(body.price, 'Price', { min: 0, max: 100_000_000 });
+      q.editResponse.run(message, price, response.id);
+      sendJson(res, 200, { response: withPhotos(q.responseById.get(response.id)) });
+    }],
+
+    // A dealer takes a response back (e.g. the car sold). The buyer sees it marked withdrawn.
+    ['DELETE', /^\/api\/responses\/(\d+)$/, async (req, res, [id]) => {
+      const account = requireAccount(req, 'dealer');
+      const response = loadOwnResponse(account, Number(id));
+      q.withdrawResponse.run(response.id);
+      sendJson(res, 200, { response: withPhotos(q.responseById.get(response.id)) });
     }],
 
     // A buyer reports a dealer's response to their own request.
@@ -1267,6 +1460,9 @@ export function createApp(
               message: x.message,
               price: x.price,
               createdAt: x.created_at,
+              withdrawn: Boolean(x.withdrawn_at),
+              feedback: x.feedback,
+              feedbackReasonLabel: FEEDBACK_REASONS[x.feedback_reason],
               request: serializeRequest({ ...x, id: x.request_id, status: x.request_status, created_at: undefined }),
             }))
           : [];
@@ -1326,7 +1522,7 @@ export function createApp(
       if (Object.keys(fields).length) {
         q.updateRequest.run({ ...parseRequestFields({ ...toBodyShape(existing), ...fields }), id: existing.id });
       }
-      if (status !== undefined) q.updateStatus.run(oneOf(status, 'Status', STATUSES, existing.status), existing.id);
+      if (status !== undefined) setRequestStatus(existing, status);
       if (hidden === true) q.hideRequest.run(str(reason, 'Reason', { max: 500 }), existing.id);
       else if (hidden === false) q.unhideRequest.run(existing.id);
 
@@ -1377,7 +1573,7 @@ export function createApp(
     }],
   ];
 
-  return async function handle(req, res) {
+  async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
     try {
       if (url.pathname.startsWith('/api/')) {
@@ -1396,7 +1592,9 @@ export function createApp(
       if (!res.headersSent) sendJson(res, status, { error: status === 500 ? 'Something went wrong' : err.message });
       else res.end();
     }
-  };
+  }
+  handle.runMaintenance = runMaintenance;
+  return handle;
 }
 
 // Converts a DB row back into the API's camelCase body shape so partial PATCHes can be merged.

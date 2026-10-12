@@ -2,6 +2,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+// How long a request stays open before it closes itself, and how early the buyer is reminded.
+export const REQUEST_LIFETIME_DAYS = 60;
+export const REMINDER_DAYS_BEFORE = 7;
+
 const SCHEMA = `
   PRAGMA foreign_keys = ON;
 
@@ -74,6 +78,11 @@ const SCHEMA = `
     -- Set by an admin to take a request off the dealer list without deleting it.
     hidden_at     TEXT,
     hidden_reason TEXT,
+    -- Open requests close themselves at expires_at; the buyer is emailed a "still looking?" reminder first.
+    expires_at  TEXT,
+    reminded_at TEXT,
+    renew_token TEXT, -- secret for the one-click "keep it open" link in the reminder email
+    expired_at  TEXT, -- set when a request was closed because it expired
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -87,6 +96,12 @@ const SCHEMA = `
     dealer_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     message    TEXT NOT NULL,
     price      INTEGER,
+    -- The buyer's reaction: 'interested' or 'not_for_me' (with an optional reason).
+    feedback        TEXT,
+    feedback_reason TEXT,
+    feedback_at     TEXT,
+    updated_at      TEXT, -- last edit by the dealer
+    withdrawn_at    TEXT, -- the dealer took the offer back (e.g. the car sold)
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -142,7 +157,8 @@ const VIEWS = `
 
   DROP VIEW IF EXISTS visible_responses;
   CREATE VIEW visible_responses AS
-    SELECT x.* FROM responses x JOIN accounts a ON a.id = x.dealer_id WHERE a.frozen_at IS NULL;
+    SELECT x.* FROM responses x JOIN accounts a ON a.id = x.dealer_id
+    WHERE a.frozen_at IS NULL AND x.withdrawn_at IS NULL;
 `;
 
 export function openDatabase(file) {
@@ -173,7 +189,15 @@ function migrate(db) {
     db.exec('UPDATE accounts SET email_verified_at = created_at');
   }
   const requestColumns = db.prepare('PRAGMA table_info(requests)').all().map((c) => c.name);
-  for (const column of ['hidden_at', 'hidden_reason']) {
+  for (const column of ['hidden_at', 'hidden_reason', 'expires_at', 'reminded_at', 'renew_token', 'expired_at']) {
     if (!requestColumns.includes(column)) db.exec(`ALTER TABLE requests ADD COLUMN ${column} TEXT`);
+  }
+  // Requests from before expiry existed get the usual lifetime, but at least two weeks from now
+  // so nothing closes the day this ships.
+  db.exec(`UPDATE requests SET expires_at = MAX(datetime(created_at, '+${REQUEST_LIFETIME_DAYS} days'), datetime('now', '+14 days'))
+    WHERE expires_at IS NULL`);
+  const responseColumns = db.prepare('PRAGMA table_info(responses)').all().map((c) => c.name);
+  for (const column of ['feedback', 'feedback_reason', 'feedback_at', 'updated_at', 'withdrawn_at']) {
+    if (!responseColumns.includes(column)) db.exec(`ALTER TABLE responses ADD COLUMN ${column} TEXT`);
   }
 }

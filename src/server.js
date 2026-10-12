@@ -33,6 +33,18 @@ const app = createApp(db, {
   }),
 });
 
+// Request reminders and expiry: once at startup, then every hour.
+const maintain = () => {
+  try {
+    const { reminded, expired } = app.runMaintenance();
+    if (reminded || expired) console.log(`Requests: ${reminded} reminder(s) sent, ${expired} expired`);
+  } catch (err) {
+    console.error('Request maintenance failed:', err);
+  }
+};
+maintain();
+setInterval(maintain, 60 * 60 * 1000).unref();
+
 createServer(app).listen(port, () => {
   console.log(`CarsFindMe running at http://localhost:${port}`);
 });

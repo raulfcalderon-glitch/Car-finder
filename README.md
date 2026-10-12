@@ -12,6 +12,10 @@ A two-sided marketplace for enthusiast cars — 911s, BMW M cars, special editio
 - **Reports:** buyers can report a dealer's response (deposit/wire request, misleading, conduct, spam, other) once per response; admins get an email and a **Reports** tab to review and resolve, and each dealer's page lists its reports.
 - **Homepage:** animated hero, example request cards, a live ticker of recent requests, scroll-in sections, and a quick-start box ("What are you hunting for?") that pre-fills the request form (through signup for visitors). Motion is turned off for reduced-motion users. A **Contact us** page sends messages to admins.
 - **Makes & models:** `public/vehicles.js` is a shared catalog (~140 enthusiast makes with nicknames like VW, Chevy, Merc; model suggestions for ~45 makes). The request form autocompletes make and model and asks "Did you mean Porsche?" for likely typos; the server saves known makes under one standard spelling (and fixes older requests at startup), and dealer search, filters and alerts use the standard names.
+- **Request expiry:** requests close by themselves after 60 days so dealers only see buyers who are still looking. A week before, the buyer gets a "Still looking?" email with a one-click **keep it open** link (no login needed); when it closes they get a reopen link. Reopening gives a fresh 60 days. The check runs at startup and hourly.
+- **Buyer feedback:** buyers mark each response **Interested** (the dealer is emailed; the buyer's contact details are not shared) or **Not for me** with an optional reason (price, spec, condition, found one elsewhere). Dealers see the reaction on the request and on their **My responses** page.
+- **Dealer edits:** dealers can edit a response's price or message while the request is open (buyers see "edited"), or **withdraw** it if the car sold (buyers see it marked withdrawn; it no longer counts).
+- **Link previews:** `og:`/Twitter tags and `public/og-image.png` (1200×630) give a branded card when carsfindme.com is shared; `apple-touch-icon.png` is the home-screen icon.
 - Buyers get an **email alert** when a dealer responds, and see each response with the dealer's contact details. Dealers only see a buyer's first name and only their own responses, not competitors'.
 
 ## Run it
@@ -82,6 +86,11 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 | GET | `/api/admin/requests` | admin | Every request with buyer details; `q` (vehicle, notes, location, buyer name/email, `#id`), `status` (`open` default, `fulfilled`, `closed`, `all`), `visibility` (`all`, `visible`, `hidden`), `sort` |
 | PATCH | `/api/admin/requests/:id` | admin | Edit any request field, set `status`, or `hidden: true` (with optional `reason`) / `false` to hide it from dealers |
 | DELETE | `/api/admin/requests/:id` | admin | Permanently delete a request and its responses |
+| POST | `/api/requests/:id/renew` | owning user | Keep the request open for another 60 days (or reopen it) |
+| POST | `/api/requests/renew` | anyone with the emailed `token` | Same, from the reminder email's one-click link |
+| PUT | `/api/responses/:id/feedback` | buyer who received it | `feedback` (`interested`, `not_for_me` or `null`), optional `reason` (`price`, `spec`, `condition`, `found`, `other`) |
+| GET | `/api/my/responses` | dealer | Your responses with the buyer's feedback |
+| PATCH / DELETE | `/api/responses/:id` | the dealer who sent it | Edit `message` / `price` (request must be open), or withdraw it |
 | POST | `/api/requests/:id/responses` | approved dealer | Respond with `message`, optional `price`, and optional `photos` (up to 6 image data URLs) |
 | POST | `/api/responses/:id/reports` | buyer who received it | Report a dealer's response: `reason` (`deposit`, `misleading`, `conduct`, `spam`, `other`), optional `details` |
 | GET | `/api/admin/reports?status=open` | admin | Reports (`open`, `resolved`, `all`) with dealer, reporter, request and response |

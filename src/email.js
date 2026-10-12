@@ -255,3 +255,73 @@ export function contactEmail({ to, name, email, topicLabel, message, account, ap
       }<br>— CarsFindMe</p>`),
   };
 }
+
+const longDate = (sqlDate) =>
+  new Date(`${sqlDate.replace(' ', 'T')}Z`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
+
+// Reminder to a buyer a week before their request closes itself.
+export function requestExpiringEmail({ buyer, request, responseCount, renewLink, link }) {
+  const vehicle = vehicleName(request);
+  const first = buyer.name.split(/\s+/)[0];
+  const closes = longDate(request.expires_at);
+  const got = responseCount
+    ? `You've had ${responseCount} dealer ${responseCount === 1 ? 'response' : 'responses'} so far.`
+    : "Dealers haven't responded yet, but new ones join all the time.";
+  return {
+    to: buyer.email,
+    subject: `Still looking for a ${vehicle}?`,
+    text:
+      `Hi ${first},\n\n` +
+      `Your request for a ${vehicle} closes on ${closes}. ${got}\n\n` +
+      `Still looking? Keep it open for another 60 days: ${renewLink}\n\n` +
+      `Found one or changed your mind? You don't need to do anything — it will close by itself so dealers stop sending offers.\n\n` +
+      `See your request: ${link}\n— CarsFindMe`,
+    html: wrap(`
+      <p>Hi ${esc(first)},</p>
+      <p>Your request for a <strong>${esc(vehicle)}</strong> closes on <strong>${esc(closes)}</strong>. ${esc(got)}</p>
+      <p>${button(renewLink, 'Still looking — keep it open')}</p>
+      <p>Found one or changed your mind? You don't need to do anything. It will close by itself so dealers stop sending offers.</p>
+      <p style="color:#5f6b7a;font-size:13px"><a href="${esc(link)}" style="color:#5f6b7a">See your request</a><br>— CarsFindMe</p>`),
+  };
+}
+
+// Tells a buyer their request closed because it expired, with a one-click way to reopen it.
+export function requestExpiredEmail({ buyer, request, renewLink }) {
+  const vehicle = vehicleName(request);
+  const first = buyer.name.split(/\s+/)[0];
+  return {
+    to: buyer.email,
+    subject: `Your ${vehicle} request has closed`,
+    text:
+      `Hi ${first},\n\n` +
+      `Your request for a ${vehicle} was open for 60 days and has now closed, so dealers won't see it anymore.\n\n` +
+      `Still looking? Reopen it for another 60 days: ${renewLink}\n— CarsFindMe`,
+    html: wrap(`
+      <p>Hi ${esc(first)},</p>
+      <p>Your request for a <strong>${esc(vehicle)}</strong> was open for 60 days and has now closed, so dealers won't see it anymore.</p>
+      <p>${button(renewLink, 'Still looking — reopen it')}</p>
+      <p style="color:#5f6b7a;font-size:13px">— CarsFindMe</p>`),
+  };
+}
+
+// Tells a dealer the buyer marked their response "Interested".
+export function responseInterestEmail({ dealer, buyerFirstName, request, response, link }) {
+  const vehicle = vehicleName(request);
+  const first = dealer.name.split(/\s+/)[0];
+  const offer = response.price != null ? ` at ${money(response.price)}` : '';
+  return {
+    to: dealer.email,
+    subject: `${buyerFirstName} is interested in your ${vehicle}`,
+    text:
+      `Hi ${first},\n\n` +
+      `Good news: ${buyerFirstName} marked your response${offer} to their ${vehicle} request as "Interested".\n\n` +
+      `They have your contact details and may reach out. Make sure you're easy to reach, and keep your response up to date if anything changes (you can edit it or withdraw it if the car sells).\n\n` +
+      `See the request: ${link}\n— CarsFindMe`,
+    html: wrap(`
+      <p>Hi ${esc(first)},</p>
+      <p>Good news: <strong>${esc(buyerFirstName)}</strong> marked your response${esc(offer)} to their <strong>${esc(vehicle)}</strong> request as <strong>Interested</strong>.</p>
+      <p>They have your contact details and may reach out. Make sure you're easy to reach, and keep your response up to date if anything changes. You can edit it, or withdraw it if the car sells.</p>
+      <p>${button(link, 'See the request')}</p>
+      <p style="color:#5f6b7a;font-size:13px">— CarsFindMe</p>`),
+  };
+}
