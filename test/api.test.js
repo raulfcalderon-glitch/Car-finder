@@ -754,3 +754,37 @@ test('dealers can attach photos to a response', async () => {
   await (await admin())('DELETE', `/api/admin/requests/${id}`);
   assert.ok(files.every((f) => !readdirSync(uploadsDir).includes(f)));
 });
+
+test('users and dealers can set and remove a profile picture', async () => {
+  const { existsSync } = await import('node:fs');
+  const buyer = await signup('user', { name: 'Avery Avatar' });
+  const dealer = await signup('dealer', { businessName: 'Avatar Autos' });
+  const jpeg = `data:image/jpeg;base64,${Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('face')]).toString('base64')}`;
+
+  assert.equal((await buyer('GET', '/api/me')).body.account.avatarUrl, null);
+  assert.equal((await buyer('PUT', '/api/me/avatar', {})).status, 400);
+  assert.equal((await buyer('PUT', '/api/me/avatar', { photo: 'data:image/svg+xml;base64,PHN2Zz4=' })).status, 400);
+  assert.equal((await client()('PUT', '/api/me/avatar', { photo: jpeg })).status, 401);
+
+  const first = (await buyer('PUT', '/api/me/avatar', { photo: jpeg })).body.account.avatarUrl;
+  assert.match(first, /^\/uploads\/[a-f0-9]{32}\.jpg$/);
+  assert.equal((await fetch(base + first)).status, 200);
+
+  // Replacing deletes the old file.
+  const second = (await buyer('PUT', '/api/me/avatar', { photo: jpeg })).body.account.avatarUrl;
+  assert.notEqual(first, second);
+  assert.equal(existsSync(`${uploadsDir}/${first.split('/').pop()}`), false);
+
+  // Dealers' pictures show on their responses; buyers' on their requests.
+  const dealerPic = (await dealer('PUT', '/api/me/avatar', { photo: jpeg })).body.account.avatarUrl;
+  const { body } = await buyer('POST', '/api/requests', { make: 'Porsche', model: '356 Speedster' });
+  await dealer('POST', `/api/requests/${body.request.id}/responses`, { message: 'Have one' });
+  assert.equal((await buyer('GET', `/api/requests/${body.request.id}`)).body.responses[0].dealer.avatarUrl, dealerPic);
+  assert.equal((await dealer('GET', `/api/requests/${body.request.id}`)).body.request.requesterAvatarUrl, second);
+  const adminList = await (await admin())('GET', '/api/admin/accounts?role=user&q=Avery');
+  assert.equal(adminList.body.accounts[0].avatarUrl, second);
+
+  const removed = await buyer('DELETE', '/api/me/avatar');
+  assert.equal(removed.body.account.avatarUrl, null);
+  assert.equal(existsSync(`${uploadsDir}/${second.split('/').pop()}`), false);
+});

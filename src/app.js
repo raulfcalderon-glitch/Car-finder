@@ -27,6 +27,7 @@ const PHOTO_TYPES = [
   { ext: 'webp', mime: 'image/webp', test: (b) => b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP' },
 ];
 const PHOTO_NAME = /^[a-f0-9]{32}\.(jpg|png|webp)$/;
+const photoUrl = (filename) => (filename ? `/uploads/${filename}` : null);
 const SESSION_COOKIE = 'cf_session';
 
 const CONDITIONS = ['any', 'concours', 'excellent', 'good', 'project'];
@@ -125,6 +126,7 @@ function serializeAdminAccount(a, isAdmin) {
     lastLoginAt: a.last_login_at,
     emailVerified: Boolean(a.email_verified_at),
     termsAcceptedAt: a.terms_accepted_at,
+    avatarUrl: photoUrl(a.avatar),
     createdAt: a.created_at,
     isAdmin,
     requestCount: a.request_count ?? undefined,
@@ -151,6 +153,7 @@ function serializeRequest(r) {
     createdAt: r.created_at,
     // Dealers see only the buyer's first name; contact happens through responses.
     requesterName: r.requester_name ? String(r.requester_name).split(/\s+/)[0] : undefined,
+    requesterAvatarUrl: r.requester_name ? photoUrl(r.requester_avatar) : undefined,
     responseCount: r.response_count ?? undefined,
   };
 }
@@ -169,6 +172,7 @@ function serializeResponse(r, photos = []) {
       businessName: r.business_name,
       email: r.dealer_email,
       phone: r.dealer_phone,
+      avatarUrl: photoUrl(r.dealer_avatar),
     },
   };
 }
@@ -319,6 +323,7 @@ export function createApp(
       phone: a.phone,
       status: a.status,
       emailVerified: Boolean(a.email_verified_at),
+      avatarUrl: photoUrl(a.avatar),
       isAdmin: isAdmin(a),
       alerts: a.role === 'dealer' ? alertSettings(a) : undefined,
     };
@@ -394,6 +399,7 @@ export function createApp(
       WHERE role = 'dealer' AND status = 'active' AND frozen_at IS NULL AND email_verified_at IS NOT NULL
         AND COALESCE(alert_mode, 'all') != 'off'`),
     setAlertToken: db.prepare('UPDATE accounts SET alert_token = ? WHERE id = ?'),
+    setAvatar: db.prepare('UPDATE accounts SET avatar = ? WHERE id = ?'),
     setAlerts: db.prepare('UPDATE accounts SET alert_mode = ?, alert_makes = ?, alert_min_budget = ? WHERE id = ?'),
     unsubscribeAlerts: db.prepare("UPDATE accounts SET alert_mode = 'off' WHERE alert_token = ? AND role = 'dealer'"),
     setAccountStatus: db.prepare('UPDATE accounts SET status = ? WHERE id = ?'),
@@ -410,7 +416,7 @@ export function createApp(
       FROM responses x JOIN requests r ON r.id = x.request_id
       WHERE x.dealer_id = ? ORDER BY x.created_at DESC, x.id DESC`),
     adminResponsesForRequest: db.prepare(`
-      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone,
+      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar,
         a.frozen_at AS dealer_frozen_at
       FROM responses x JOIN accounts a ON a.id = x.dealer_id
       WHERE x.request_id = ? ORDER BY x.created_at ASC, x.id ASC`),
@@ -429,18 +435,18 @@ export function createApp(
     unhideRequest: db.prepare('UPDATE requests SET hidden_at = NULL, hidden_reason = NULL WHERE id = ?'),
     deleteRequest: db.prepare('DELETE FROM requests WHERE id = ?'),
     requestById: db.prepare(`
-      SELECT r.*, a.name AS requester_name, a.email AS requester_email, a.frozen_at AS requester_frozen_at,
+      SELECT r.*, a.name AS requester_name, a.email AS requester_email, a.frozen_at AS requester_frozen_at, a.avatar AS requester_avatar,
         (SELECT COUNT(*) FROM visible_responses x WHERE x.request_id = r.id) AS response_count
       FROM requests r JOIN accounts a ON a.id = r.user_id WHERE r.id = ?`),
     requestsByUser: db.prepare(`
       SELECT r.*, (SELECT COUNT(*) FROM visible_responses x WHERE x.request_id = r.id) AS response_count
       FROM requests r WHERE r.user_id = ? ORDER BY r.created_at DESC, r.id DESC`),
     responsesForRequest: db.prepare(`
-      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone
+      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar
       FROM visible_responses x JOIN accounts a ON a.id = x.dealer_id
       WHERE x.request_id = ? ORDER BY x.created_at ASC, x.id ASC`),
     responsesForRequestByDealer: db.prepare(`
-      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone
+      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar
       FROM responses x JOIN accounts a ON a.id = x.dealer_id
       WHERE x.request_id = ? AND x.dealer_id = ? ORDER BY x.created_at ASC, x.id ASC`),
     insertResponse: db.prepare('INSERT INTO responses (request_id, dealer_id, message, price) VALUES (?, ?, ?, ?)'),
@@ -449,7 +455,7 @@ export function createApp(
     photosForRequest: db.prepare(`
       SELECT p.filename FROM response_photos p JOIN responses x ON x.id = p.response_id WHERE x.request_id = ?`),
     responseById: db.prepare(`
-      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone
+      SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar
       FROM responses x JOIN accounts a ON a.id = x.dealer_id WHERE x.id = ?`),
     distinctMakes: db.prepare(
       "SELECT DISTINCT make FROM visible_requests WHERE status = 'open' ORDER BY make COLLATE NOCASE",
@@ -571,6 +577,7 @@ export function createApp(
         name: row.requester_name,
         email: row.requester_email,
         frozen: Boolean(row.requester_frozen_at),
+        avatarUrl: photoUrl(row.requester_avatar),
       },
     };
   }
@@ -602,7 +609,7 @@ export function createApp(
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const rows = db
       .prepare(`
-        SELECT r.*, a.name AS requester_name, a.email AS requester_email, a.frozen_at AS requester_frozen_at,
+        SELECT r.*, a.name AS requester_name, a.email AS requester_email, a.frozen_at AS requester_frozen_at, a.avatar AS requester_avatar,
           (SELECT COUNT(*) FROM responses x WHERE x.request_id = r.id) AS response_count
         FROM requests r JOIN accounts a ON a.id = r.user_id
         ${whereSql}
@@ -850,6 +857,28 @@ export function createApp(
       if (mode === 'makes' && !makes.length) throw new HttpError(400, 'Add at least one make, or choose "All new requests"');
       const minBudget = int(body.minBudget, 'Minimum budget', { min: 0, max: 100_000_000 });
       q.setAlerts.run(mode, JSON.stringify(makes), minBudget, account.id);
+      sendJson(res, 200, { account: publicAccount(q.accountById.get(account.id)) });
+    }],
+
+    // Profile picture: one square image, replaced or removed at any time.
+    ['PUT', /^\/api\/me\/avatar$/, async (req, res) => {
+      const account = currentAccount(req);
+      if (!account) throw new HttpError(401, 'Please log in');
+      if (!uploadsDir) throw new HttpError(400, 'Photo uploads are not available');
+      const [photo] = decodePhotos([(await readJson(req, 8 * 1024 * 1024)).photo]);
+      await mkdir(uploadsDir, { recursive: true });
+      const name = `${randomBytes(16).toString('hex')}.${photo.ext}`;
+      await writeFile(join(uploadsDir, name), photo.bytes);
+      q.setAvatar.run(name, account.id);
+      if (account.avatar) await removePhotoFiles([account.avatar]);
+      sendJson(res, 200, { account: publicAccount(q.accountById.get(account.id)) });
+    }],
+
+    ['DELETE', /^\/api\/me\/avatar$/, async (req, res) => {
+      const account = currentAccount(req);
+      if (!account) throw new HttpError(401, 'Please log in');
+      q.setAvatar.run(null, account.id);
+      if (account.avatar) await removePhotoFiles([account.avatar]);
       sendJson(res, 200, { account: publicAccount(q.accountById.get(account.id)) });
     }],
 

@@ -8,6 +8,7 @@ A two-sided marketplace for enthusiast cars — 911s, BMW M cars, special editio
 - **Accounts:** signup requires accepting the Terms and Privacy Policy and confirming the email address (needed before posting a request or responding); "forgot password" emails a one-hour, single-use reset link; repeated wrong passwords lock that email out for 15 minutes.
 - **Dealer alerts:** approved dealers get an email for each new request — all of them, only certain makes, or off, with an optional minimum budget (set on the **Alerts** page). Emails include a one-click unsubscribe (also via mail apps' `List-Unsubscribe`).
 - **Photos:** dealers can attach up to 6 photos to a response. The browser shrinks them (max 1600px JPEG) before upload; the server checks they're real JPEG/PNG/WebP files and stores them in `uploads/` next to the database (so on the persistent disk). Buyers see them on the request and in the response email.
+- **Profiles:** everyone can upload a profile picture (center-cropped to a square in the browser); without one, a colored circle shows up to two initials (business name for dealers). Dealers' pictures show on their responses, buyers' on their requests.
 - Buyers get an **email alert** when a dealer responds, and see each response with the dealer's contact details. Dealers only see a buyer's first name and only their own responses, not competitors'.
 
 ## Run it
@@ -54,6 +55,7 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 | POST | `/api/signup`, `/api/login`, `/api/logout` | anyone | Accounts (`role` is `user` or `dealer`; signup needs `acceptTerms: true`) |
 | GET | `/api/me` | anyone | Current account |
 | PUT | `/api/me/alerts` | dealer | Alert settings: `mode` (`all`, `makes`, `off`), `makes` (list or comma-separated), `minBudget` |
+| PUT / DELETE | `/api/me/avatar` | signed in | Set (`photo` as an image data URL) or remove your profile picture |
 | POST | `/api/alerts/unsubscribe?token=` | anyone | Turn off a dealer's alerts from an email link |
 | POST | `/api/verify` | anyone | Confirm an email address with the emailed `token` |
 | POST | `/api/verify/resend` | signed in | Send a new confirmation email |

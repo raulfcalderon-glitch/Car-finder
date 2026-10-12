@@ -83,26 +83,162 @@ const go = (hash) => {
 
 // ---------- nav ----------
 
-function renderNav() {
-  if (!me) {
-    nav.innerHTML = `<a href="#/login">Log in</a><a class="button" href="#/signup">Sign up</a>`;
-    return;
-  }
-  const links =
+// ---------- avatars ----------
+
+// Up to two initials: "Stuttgart Classics" → SC, "Raul Calderon" → RC, "Porsche" → P.
+function initials(text) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  return ((words[0]?.[0] ?? '?') + (words[1]?.[0] ?? '')).toUpperCase();
+}
+
+const displayName = (p) => (p.role === 'dealer' || !p.name ? p.businessName || p.name : p.name);
+
+// A profile picture, or a colored circle with initials. Same name → same color, everywhere.
+function avatar(person, size = 36) {
+  const label = person.businessName || person.name || '';
+  const style = `width:${size}px;height:${size}px`;
+  if (person.avatarUrl) return `<img class="avatar" src="${esc(person.avatarUrl)}" alt="" style="${style}">`;
+  let hash = 0;
+  for (const c of label) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+  return `<span class="avatar" aria-hidden="true" style="${style};font-size:${Math.round(size * 0.4)}px;background:hsl(${hash % 360} 42% 38%)">${esc(initials(label))}</span>`;
+}
+
+// ---------- nav ----------
+
+function navItems() {
+  const items =
     me.role === 'dealer'
       ? me.status === 'active'
-        ? `<a href="#/browse">Browse requests</a><a href="#/alerts">Alerts</a>`
-        : `<a href="#/alerts">Alerts</a>`
-      : `<a href="#/my">My requests</a><a href="#/new">New request</a>`;
-  nav.innerHTML = `${links}${me.isAdmin ? `<a href="#/admin">Admin</a>` : ''}
-    <span class="who">${esc(me.businessName || me.name)} · ${me.role === 'dealer' ? 'Dealer' : 'Buyer'}</span>
-    <a href="#" id="logout">Log out</a>`;
-  nav.querySelector('#logout').addEventListener('click', async (e) => {
-    e.preventDefault();
+        ? [['#/browse', 'Requests'], ['#/alerts', 'Alerts']]
+        : [['#/alerts', 'Alerts']]
+      : [['#/my', 'My requests'], ['#/new', 'New request']];
+  if (me.isAdmin) items.push(['#/admin', 'Admin']);
+  return items;
+}
+
+const chevron = '<svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function renderNav() {
+  if (!me) {
+    nav.innerHTML = `<a class="nav-login" href="#/login">Log in</a><a class="button" href="#/signup">Sign up</a>`;
+    return;
+  }
+  const path = location.hash.split('?')[0] || '#/';
+  const links = navItems()
+    .map(([href, label]) => `<a href="${href}" class="${path === href || path.startsWith(`${href}/`) ? 'active' : ''}">${label}</a>`)
+    .join('');
+  nav.innerHTML = `
+    <div class="nav-links">${links}</div>
+    <div class="account">
+      <button class="account-button" id="account-button" aria-haspopup="menu" aria-expanded="false">
+        ${avatar(me, 32)}<span class="account-name">${esc(displayName(me))}</span>${chevron}
+      </button>
+      <div class="menu" id="account-menu" role="menu" hidden>
+        <div class="menu-head">
+          ${avatar(me, 44)}
+          <div>
+            <strong>${esc(displayName(me))}</strong>
+            <span class="muted">${esc(me.email)}</span>
+            <span class="role-tag">${me.role === 'dealer' ? 'Dealer' : 'Buyer'}${me.isAdmin ? ' · Admin' : ''}</span>
+          </div>
+        </div>
+        <div class="menu-links menu-mobile">${links}</div>
+        <a href="#/profile" role="menuitem">Profile &amp; photo</a>
+        <a href="#/" role="menuitem">Home</a>
+        <button type="button" id="logout" role="menuitem">Log out</button>
+      </div>
+    </div>`;
+  const button = nav.querySelector('#account-button');
+  const menu = nav.querySelector('#account-menu');
+  button.addEventListener('click', (e) => {
+    e.stopPropagation();
+    menu.hidden = !menu.hidden;
+    button.setAttribute('aria-expanded', String(!menu.hidden));
+  });
+  nav.querySelector('#logout').addEventListener('click', async () => {
     await api('/api/logout', { method: 'POST' });
     me = null;
     go('#/');
   });
+}
+
+// Close the account menu when clicking elsewhere or pressing Escape.
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('account-menu');
+  if (menu && !menu.hidden && !e.target.closest('#account-menu')) {
+    menu.hidden = true;
+    document.getElementById('account-button')?.setAttribute('aria-expanded', 'false');
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.getElementById('account-menu')?.setAttribute('hidden', '');
+});
+
+function profilePage() {
+  view.innerHTML = `
+    <div class="card profile" style="max-width:560px;margin:0 auto">
+      <h1>Profile</h1>
+      <div class="profile-row">
+        <div id="profile-avatar">${avatar(me, 96)}</div>
+        <div>
+          <strong class="profile-name">${esc(displayName(me))}</strong>
+          ${me.role === 'dealer' && me.businessName ? `<div class="muted">${esc(me.name)}</div>` : ''}
+          <div class="muted">${esc(me.email)}</div>
+          <span class="role-tag">${me.role === 'dealer' ? 'Dealer' : 'Buyer'}</span>
+        </div>
+      </div>
+      <p class="muted">${
+        me.role === 'dealer'
+          ? 'Your photo or logo appears next to your responses, so buyers recognize you.'
+          : 'Your photo appears next to your requests. Dealers still only see your first name.'
+      } Without one, we show your initials.</p>
+      <div class="row">
+        <label class="button" for="avatar-input">${me.avatarUrl ? 'Change photo' : 'Upload photo'}</label>
+        <input id="avatar-input" type="file" accept="image/*" hidden>
+        ${me.avatarUrl ? '<button class="secondary" id="avatar-remove">Remove photo</button>' : ''}
+      </div>
+      <p class="error"></p>
+    </div>`;
+  const error = view.querySelector('.error');
+  view.querySelector('#avatar-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    error.textContent = '';
+    view.querySelector('#profile-avatar').innerHTML = '<span class="muted">Uploading…</span>';
+    try {
+      me = (await api('/api/me/avatar', { method: 'PUT', body: { photo: await squarePhoto(file) } })).account;
+    } catch (err) {
+      error.textContent = err.message.includes('Failed to') ? "Couldn't read that image. Try a JPEG or PNG." : err.message;
+    }
+    renderNav();
+    profilePage();
+  });
+  view.querySelector('#avatar-remove')?.addEventListener('click', async () => {
+    me = (await api('/api/me/avatar', { method: 'DELETE' })).account;
+    renderNav();
+    profilePage();
+  });
+}
+
+// Center-crops a photo to a square and shrinks it for use as a profile picture.
+async function squarePhoto(file, size = 400) {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const side = Math.min(bitmap.width, bitmap.height);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = Math.min(size, side);
+  canvas.getContext('2d').drawImage(
+    bitmap,
+    (bitmap.width - side) / 2,
+    (bitmap.height - side) / 2,
+    side,
+    side,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
+  bitmap.close?.();
+  return canvas.toDataURL('image/jpeg', 0.85);
 }
 
 // ---------- views ----------
@@ -138,7 +274,7 @@ function landingLinks() {
       primary: ['#/signup?role=user', "Post a request — it's free"],
       secondary: ['#/signup?role=dealer', "I'm a dealer"],
       buyer: ['#/signup?role=user', 'Post a request'],
-      dealer: ['#/signup?role=dealer', 'Apply as a dealer'],
+      dealer: ['#/signup?role=dealer', 'Become a Dealer'],
       closing: ['#/signup?role=user', 'Post your first request'],
     };
   }
@@ -147,7 +283,7 @@ function landingLinks() {
     return { primary: browse, secondary: ['#/alerts', 'Alert settings'], buyer: null, dealer: browse, closing: browse };
   }
   const post = ['#/new', 'Post a new request'];
-  return { primary: post, secondary: ['#/my', 'My requests'], buyer: post, dealer: null, closing: post };
+  return { primary: post, secondary: ['#/my', 'My requests'], buyer: post, dealer: ['#/signup?role=dealer', 'Become a Dealer'], closing: post };
 }
 
 function landing() {
@@ -238,6 +374,25 @@ function login() {
 
 function signup(params) {
   const role = params.get('role') === 'dealer' ? 'dealer' : 'user';
+  if (me) {
+    view.innerHTML = `
+      <div class="narrow card">
+        <h1>${role === 'dealer' ? 'Become a Dealer' : 'Create an account'}</h1>
+        <p>You're signed in as <strong>${esc(displayName(me))}</strong> (${esc(me.email)}).</p>
+        <p class="muted">${
+          role === 'dealer'
+            ? 'Dealer accounts are separate from buyer accounts and need their own email address. Log out to apply as a dealer.'
+            : 'Log out first to create a different account.'
+        }</p>
+        <div class="row"><button id="switch">Log out and continue</button><a href="${home()}">Cancel</a></div>
+      </div>`;
+    view.querySelector('#switch').addEventListener('click', async () => {
+      await api('/api/logout', { method: 'POST' });
+      me = null;
+      render();
+    });
+    return;
+  }
   view.innerHTML = `
     <div class="narrow card">
       <h1>Create an account</h1>
@@ -627,7 +782,7 @@ async function requestDetail(id) {
           (x) => `
         <div class="card response">
           <div class="row spread">
-            <strong>${esc(x.dealer.businessName || x.dealer.name)}${
+            <strong class="with-avatar">${avatar({ ...x.dealer, role: 'dealer' }, 40)}<span>${esc(x.dealer.businessName || x.dealer.name)}</span>${
               isAdminView ? ` <a class="muted" href="#/admin/account/${x.dealer.id}">view dealer</a>` : ''
             }${x.dealerFrozen ? ' <span class="pill closed">frozen — hidden from buyer</span>' : ''}</strong>
             <span class="muted">${ago(x.createdAt)}</span>
@@ -683,7 +838,7 @@ async function requestDetail(id) {
               r.requester.frozen ? ' <span class="pill closed">account frozen — hidden from dealers</span>' : ''
             }`
           : !isOwner && r.requesterName
-            ? ` by ${esc(r.requesterName)}`
+            ? ` by <span class="inline-avatar">${avatar({ name: r.requesterName, avatarUrl: r.requesterAvatarUrl }, 22)}</span> ${esc(r.requesterName)}`
             : ''
       }</p>
       <dl class="facts">
@@ -1042,9 +1197,9 @@ async function admin(params) {
               .map(
                 (a) => `
               <tr data-id="${a.id}">
-                <td><strong>${esc(role === 'dealer' ? a.businessName || a.name : a.name)}</strong>${
+                <td><div class="with-avatar">${avatar(a, 32)}<div><strong>${esc(role === 'dealer' ? a.businessName || a.name : a.name)}</strong>${
                   role === 'dealer' ? `<br><span class="muted">${esc(a.name)}</span>` : ''
-                }${a.isAdmin ? ' <span class="pill open">admin</span>' : ''}</td>
+                }${a.isAdmin ? ' <span class="pill open">admin</span>' : ''}</div></div></td>
                 <td>${esc(a.email)}${a.phone ? `<br><span class="muted">${esc(a.phone)}</span>` : ''}</td>
                 <td>${accountBadge(a)}${unverifiedBadge(a)}</td>
                 ${role === 'dealer' ? `<td>${a.responseCount}</td>` : `<td>${a.requestCount}</td><td>${a.openRequestCount}</td>`}
@@ -1136,7 +1291,7 @@ async function adminAccount(id) {
     <p><a href="${listHref}">← All ${isDealer ? 'dealers' : 'users'}</a></p>
     <div class="card">
       <div class="row spread">
-        <h1 style="margin:0">${esc(isDealer ? a.businessName || a.name : a.name)}</h1>
+        <h1 class="with-avatar" style="margin:0">${avatar(a, 52)}<span>${esc(isDealer ? a.businessName || a.name : a.name)}</span></h1>
         <span>${accountBadge(a)}${a.isAdmin ? ' <span class="pill open">admin</span>' : ''}</span>
       </div>
       ${
@@ -1217,11 +1372,12 @@ async function render() {
     '/verify': verifyEmailPage,
     '/reset': resetPassword,
     '/unsubscribe': unsubscribePage,
+    '/signup': signup,
   };
   if (path in openRoutes) return openRoutes[path](params);
 
   // Pages for signed-out visitors only.
-  const guestRoutes = { '/login': login, '/signup': signup, '/forgot': forgotPassword };
+  const guestRoutes = { '/login': login, '/forgot': forgotPassword };
   if (path in guestRoutes) {
     if (me) return go(home());
     return guestRoutes[path](params);
@@ -1231,6 +1387,7 @@ async function render() {
   try {
     if (me.isAdmin && path === '/admin') return await admin(params);
     if (me.role === 'dealer' && path === '/alerts') return alertSettingsPage();
+    if (path === '/profile') return profilePage();
     const adminDetail = path.match(/^\/admin\/account\/(\d+)$/);
     if (me.isAdmin && adminDetail) return await adminAccount(adminDetail[1]);
     if (me.isAdmin && path === '/admin/requests') return await adminRequests(params);

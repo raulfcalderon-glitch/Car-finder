@@ -26,6 +26,7 @@ const SCHEMA = `
     alert_makes      TEXT, -- JSON array of lowercase makes
     alert_min_budget INTEGER,
     alert_token      TEXT, -- secret for one-click unsubscribe links
+    avatar           TEXT, -- profile picture filename in the uploads folder
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -124,7 +125,7 @@ function migrate(db) {
     db.exec(`ALTER TABLE accounts ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
       CHECK (status IN ('active', 'pending', 'rejected'))`);
   }
-  for (const column of ['frozen_at', 'frozen_reason', 'last_login_at', 'terms_accepted_at', 'alert_mode', 'alert_makes', 'alert_token']) {
+  for (const column of ['frozen_at', 'frozen_reason', 'last_login_at', 'terms_accepted_at', 'alert_mode', 'alert_makes', 'alert_token', 'avatar']) {
     if (!columns.includes(column)) db.exec(`ALTER TABLE accounts ADD COLUMN ${column} TEXT`);
   }
   if (!columns.includes('alert_min_budget')) db.exec('ALTER TABLE accounts ADD COLUMN alert_min_budget INTEGER');
