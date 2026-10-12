@@ -1,4 +1,7 @@
+import { TERMS_HTML, PRIVACY_HTML, LEGAL_UPDATED } from './legal.js';
+
 const view = document.getElementById('view');
+const banner = document.getElementById('banner');
 const nav = document.getElementById('nav');
 let me = null;
 
@@ -133,6 +136,7 @@ function login() {
         <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
         <p class="error"></p>
         <button type="submit">Log in</button>
+        <p><a href="#/forgot">Forgot your password?</a></p>
         <p class="muted">No account? <a href="#/signup">Sign up</a></p>
       </form>
     </div>`;
@@ -157,6 +161,7 @@ function signup(params) {
         <label>Email <input name="email" type="email" autocomplete="email" required></label>
         <label class="dealer-only">Phone <span class="hint">shown to buyers you respond to</span><input name="phone" type="tel" autocomplete="tel"></label>
         <label>Password <span class="hint">at least 8 characters</span><input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+        <label class="checkbox"><input type="checkbox" name="acceptTerms" required> <span>I'm 18 or older and agree to the <a href="#/terms" target="_blank">Terms of Service</a> and <a href="#/privacy" target="_blank">Privacy Policy</a>.</span></label>
         <p class="error"></p>
         <button type="submit">Create account</button>
         <p class="muted">Already have one? <a href="#/login">Log in</a></p>
@@ -171,8 +176,114 @@ function signup(params) {
   form.addEventListener('change', syncRole);
   syncRole();
   bindForm(form, async (data) => {
-    me = (await api('/api/signup', { method: 'POST', body: data })).account;
+    me = (await api('/api/signup', { method: 'POST', body: { ...data, acceptTerms: data.acceptTerms === 'on' } })).account;
     go(home());
+  });
+}
+
+function forgotPassword() {
+  view.innerHTML = `
+    <div class="narrow card">
+      <h1>Reset your password</h1>
+      <p class="muted">Enter the email you signed up with and we'll send you a link to choose a new password.</p>
+      <form>
+        <label>Email <input name="email" type="email" autocomplete="email" required></label>
+        <p class="error"></p>
+        <button type="submit">Send reset link</button>
+        <p><a href="#/login">Back to log in</a></p>
+      </form>
+    </div>`;
+  bindForm(view.querySelector('form'), async (data) => {
+    await api('/api/password/forgot', { method: 'POST', body: data });
+    view.innerHTML = `
+      <div class="narrow card">
+        <h1>Check your email</h1>
+        <p>If an account exists for <strong>${esc(data.email)}</strong>, we've sent a link to reset your password. It works for 1 hour.</p>
+        <p class="muted">Don't see it? Check your spam folder, or <a href="#/forgot">try again</a>.</p>
+      </div>`;
+  });
+}
+
+function resetPassword(params) {
+  view.innerHTML = `
+    <div class="narrow card">
+      <h1>Choose a new password</h1>
+      <form>
+        <label>New password <span class="hint">at least 8 characters</span><input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+        <label>Confirm new password <input name="confirm" type="password" minlength="8" autocomplete="new-password" required></label>
+        <p class="error"></p>
+        <button type="submit">Save password</button>
+      </form>
+    </div>`;
+  bindForm(view.querySelector('form'), async ({ password, confirm }) => {
+    if (password !== confirm) throw new Error("The passwords don't match");
+    const result = await api('/api/password/reset', { method: 'POST', body: { token: params.get('token'), password } });
+    me = result.account;
+    view.innerHTML = `
+      <div class="narrow card">
+        <h1>Password updated</h1>
+        <p>${me ? "You're signed in with your new password." : 'You can now log in with your new password.'}</p>
+        <a class="button" href="${me ? home() : '#/login'}">Continue</a>
+      </div>`;
+    renderNav();
+    renderBanner();
+  });
+}
+
+async function verifyEmailPage(params) {
+  try {
+    await api('/api/verify', { method: 'POST', body: { token: params.get('token') } });
+    if (me) me = (await api('/api/me')).account;
+    renderNav();
+    renderBanner();
+    view.innerHTML = `
+      <div class="narrow card" style="text-align:center">
+        <h1>Email confirmed</h1>
+        <p>Thanks — your email address is confirmed.</p>
+        <a class="button" href="${me ? home() : '#/login'}">${me ? 'Continue' : 'Log in'}</a>
+      </div>`;
+  } catch (err) {
+    view.innerHTML = `
+      <div class="narrow card" style="text-align:center">
+        <h1>Link expired</h1>
+        <p>${esc(err.message)}</p>
+        <a class="button" href="${me ? home() : '#/login'}">${me ? 'Continue' : 'Log in'}</a>
+      </div>`;
+  }
+}
+
+function legalPage(title, html) {
+  view.innerHTML = `
+    <article class="card legal">
+      <h1>${title}</h1>
+      <p class="muted">Last updated ${LEGAL_UPDATED}</p>
+      ${html}
+    </article>`;
+  window.scrollTo(0, 0);
+}
+
+// Reminder for signed-in people who haven't confirmed their email yet.
+function renderBanner() {
+  if (!me || me.emailVerified) {
+    banner.innerHTML = '';
+    return;
+  }
+  banner.innerHTML = `
+    <div class="verify-banner">
+      <span>Please confirm your email — we sent a link to <strong>${esc(me.email)}</strong>. ${
+        me.role === 'dealer' ? "You'll need to confirm before responding to buyers." : "You'll need to confirm before posting a request."
+      }</span>
+      <button class="secondary small" id="resend">Resend email</button>
+    </div>`;
+  banner.querySelector('#resend').addEventListener('click', async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try {
+      await api('/api/verify/resend', { method: 'POST' });
+      b.textContent = 'Sent — check your inbox';
+    } catch (err) {
+      b.textContent = err.message;
+    }
   });
 }
 
@@ -559,6 +670,8 @@ function accountBadge(a) {
   return `<span class="pill open">${a.role === 'dealer' ? 'approved' : 'active'}</span>`;
 }
 
+const unverifiedBadge = (a) => (a.emailVerified ? '' : ' <span class="pill pending">email not confirmed</span>');
+
 const when = (d) => (d ? ago(d) : '<span class="muted">never</span>');
 
 // Stat tiles and the Dealers / Users / Requests tabs shared by the admin list pages.
@@ -582,6 +695,7 @@ function adminHeader(stats, tab) {
       <a class="button ${tab === 'dealer' ? '' : 'secondary'}" href="#/admin?role=dealer">Dealers</a>
       <a class="button ${tab === 'user' ? '' : 'secondary'}" href="#/admin?role=user&status=all">Users</a>
       <a class="button ${tab === 'requests' ? '' : 'secondary'}" href="#/admin/requests">Requests</a>
+      <a class="backup-link" href="/api/admin/backup" download title="Download a copy of the whole database">Download backup</a>
     </div>`;
 }
 
@@ -732,7 +846,7 @@ async function admin(params) {
                   role === 'dealer' ? `<br><span class="muted">${esc(a.name)}</span>` : ''
                 }${a.isAdmin ? ' <span class="pill open">admin</span>' : ''}</td>
                 <td>${esc(a.email)}${a.phone ? `<br><span class="muted">${esc(a.phone)}</span>` : ''}</td>
-                <td>${accountBadge(a)}</td>
+                <td>${accountBadge(a)}${unverifiedBadge(a)}</td>
                 ${role === 'dealer' ? `<td>${a.responseCount}</td>` : `<td>${a.requestCount}</td><td>${a.openRequestCount}</td>`}
                 <td>${ago(a.createdAt)}</td>
                 <td>${when(a.lastLoginAt)}</td>
@@ -781,6 +895,7 @@ async function adminAccount(id) {
     isDealer && a.status === 'active' && `<button class="secondary" data-patch='{"status":"rejected"}' data-confirm="Revoke this dealer's approval? They'll lose access to buyer requests.">Revoke approval</button>`,
     !a.isAdmin && !a.frozen && `<button class="danger" id="freeze">Freeze account</button>`,
     a.frozen && `<button data-patch='{"frozen":false}'>Unfreeze account</button>`,
+    !a.emailVerified && `<button class="secondary" data-patch='{"verified":true}' data-confirm="Mark this email as confirmed without the user clicking the link?">Mark email confirmed</button>`,
   ]
     .filter(Boolean)
     .join('');
@@ -834,10 +949,13 @@ async function adminAccount(id) {
       <dl class="facts">
         <dt>Type</dt><dd>${isDealer ? 'Dealer' : 'User (buyer)'}</dd>
         ${isDealer ? `<dt>Contact name</dt><dd>${esc(a.name)}</dd>` : ''}
-        <dt>Email</dt><dd><a href="mailto:${esc(a.email)}">${esc(a.email)}</a></dd>
+        <dt>Email</dt><dd><a href="mailto:${esc(a.email)}">${esc(a.email)}</a> ${
+          a.emailVerified ? '<span class="pill open">confirmed</span>' : '<span class="pill pending">not confirmed</span>'
+        }</dd>
         <dt>Phone</dt><dd>${a.phone ? `<a href="tel:${esc(a.phone)}">${esc(a.phone)}</a>` : '<span class="muted">—</span>'}</dd>
         <dt>Signed up</dt><dd>${new Date(`${a.createdAt.replace(' ', 'T')}Z`).toLocaleString()} (${ago(a.createdAt)})</dd>
         <dt>Last login</dt><dd>${when(a.lastLoginAt)}</dd>
+        <dt>Accepted terms</dt><dd>${a.termsAcceptedAt ? ago(a.termsAcceptedAt) : '<span class="muted">before terms existed</span>'}</dd>
         ${
           isDealer
             ? `<dt>Responses sent</dt><dd>${a.responseCount}</dd>`
@@ -888,11 +1006,22 @@ async function render() {
   const [path, search = ''] = location.hash.replace(/^#/, '').split('?');
   const params = new URLSearchParams(search);
   renderNav();
+  renderBanner();
 
-  const publicRoutes = { '': landing, '/': landing, '/login': login, '/signup': signup };
-  if (path in publicRoutes) {
+  // Pages anyone can open, signed in or not.
+  const openRoutes = {
+    '/terms': () => legalPage('Terms of Service', TERMS_HTML),
+    '/privacy': () => legalPage('Privacy Policy', PRIVACY_HTML),
+    '/verify': verifyEmailPage,
+    '/reset': resetPassword,
+  };
+  if (path in openRoutes) return openRoutes[path](params);
+
+  // Pages for signed-out visitors only.
+  const guestRoutes = { '': landing, '/': landing, '/login': login, '/signup': signup, '/forgot': forgotPassword };
+  if (path in guestRoutes) {
     if (me) return go(home());
-    return publicRoutes[path](params);
+    return guestRoutes[path](params);
   }
   if (!me) return go('#/login');
 

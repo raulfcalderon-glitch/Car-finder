@@ -125,3 +125,17 @@ button.danger:hover { background: var(--accent); color: var(--accent-text); }
 .filters.admin-request-filters { grid-template-columns: 3fr 1fr 1.3fr 1.2fr; }
 @media (max-width: 900px) { .filters.admin-request-filters { grid-template-columns: 1fr 1fr; } }
 button.small { padding: 4px 10px; font-size: .85rem; }
+
+/* banner, footer, legal */
+.verify-banner {
+  display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap;
+  padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: .92rem; text-align: center;
+}
+.footer { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; padding: 24px 16px 40px; color: var(--muted); font-size: .85rem; }
+.footer a { color: var(--muted); }
+.legal { max-width: 760px; margin: 0 auto; }
+.legal h2 { font-size: 1.1rem; margin-top: 1.4em; }
+.legal-draft { display: inline-block; border: 1px dashed var(--warn); color: var(--warn); padding: 2px 10px; border-radius: 6px; font-size: .85rem; }
+label.checkbox { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; }
+label.checkbox input { width: auto; margin-top: 4px; }
+.backup-link { margin-left: auto; font-size: .9rem; }

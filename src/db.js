@@ -19,7 +19,19 @@ const SCHEMA = `
     frozen_at     TEXT,
     frozen_reason TEXT,
     last_login_at TEXT,
+    email_verified_at TEXT,
+    terms_accepted_at TEXT,
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- One-time links sent by email: verifying an address, or resetting a password.
+  -- Only a hash of the token is stored, so a leaked database can't be used to take over accounts.
+  CREATE TABLE IF NOT EXISTS tokens (
+    token_hash TEXT PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    purpose    TEXT NOT NULL CHECK (purpose IN ('verify', 'reset')),
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS sessions (
@@ -97,8 +109,13 @@ function migrate(db) {
     db.exec(`ALTER TABLE accounts ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
       CHECK (status IN ('active', 'pending', 'rejected'))`);
   }
-  for (const column of ['frozen_at', 'frozen_reason', 'last_login_at']) {
+  for (const column of ['frozen_at', 'frozen_reason', 'last_login_at', 'terms_accepted_at']) {
     if (!columns.includes(column)) db.exec(`ALTER TABLE accounts ADD COLUMN ${column} TEXT`);
+  }
+  if (!columns.includes('email_verified_at')) {
+    // Accounts created before email verification existed are treated as verified.
+    db.exec('ALTER TABLE accounts ADD COLUMN email_verified_at TEXT');
+    db.exec('UPDATE accounts SET email_verified_at = created_at');
   }
   const requestColumns = db.prepare('PRAGMA table_info(requests)').all().map((c) => c.name);
   for (const column of ['hidden_at', 'hidden_reason']) {

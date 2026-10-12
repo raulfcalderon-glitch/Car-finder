@@ -6,6 +6,7 @@ import { createApp } from '../src/app.js';
 
 let server;
 let base;
+let testDb;
 const sentEmails = [];
 let failNextEmail = false;
 
@@ -17,10 +18,13 @@ before(async () => {
     }
     sentEmails.push(email);
   };
-  server = createServer(createApp(openDatabase(':memory:'), {
+  testDb = openDatabase(':memory:');
+  server = createServer(createApp(testDb, {
     sendEmail,
     appUrl: 'https://cars.test',
     adminEmails: ['Admin@test.com', ' ', 'boss@test.com'],
+    // Tests create many accounts from one address; keep the real login limits so they're tested.
+    limits: { signupPerIp: { max: 10_000, windowMs: 60_000 }, emailPerIp: { max: 10_000, windowMs: 60_000 } },
   }));
   await new Promise((resolve) => server.listen(0, resolve));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -31,7 +35,7 @@ after(() => server.close());
 // Tiny cookie-keeping client so each test actor has its own session.
 function client() {
   let cookie = '';
-  return async (method, path, body) => {
+  const call = async (method, path, body) => {
     const res = await fetch(base + path, {
       method,
       headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(cookie ? { Cookie: cookie } : {}) },
@@ -41,21 +45,41 @@ function client() {
     if (setCookie) cookie = setCookie.split(';')[0];
     return { status: res.status, body: await res.json() };
   };
+  call.cookie = () => cookie;
+  return call;
 }
 
 let n = 0;
 let adminClient;
 
+const tick = () => new Promise((r) => setTimeout(r, 20));
+
+// Finds the most recent email to an address and pulls the token out of its link.
+async function tokenFromEmail(to, path) {
+  await tick();
+  const email = [...sentEmails].reverse().find((e) => e.to === to && e.text.includes(`/#/${path}?token=`));
+  assert.ok(email, `no ${path} email sent to ${to}`);
+  return email.text.match(new RegExp(`/#/${path}\\?token=([\\w-]+)`))[1];
+}
+
+async function confirmEmail(call, email) {
+  const res = await call('POST', '/api/verify', { token: await tokenFromEmail(email, 'verify') });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+}
+
 async function admin() {
   if (!adminClient) {
     adminClient = client();
-    await adminClient('POST', '/api/signup', { email: 'admin@test.com', password: 'password123', name: 'Ada Admin', role: 'user' });
+    await adminClient('POST', '/api/signup', {
+      email: 'admin@test.com', password: 'password123', name: 'Ada Admin', role: 'user', acceptTerms: true,
+    });
   }
   return adminClient;
 }
 
-// Signs up an account. Dealers are approved by the admin unless { approve: false } is passed.
-async function signup(role, { approve = true, ...extra } = {}) {
+// Signs up an account and confirms its email. Dealers are approved by the admin unless
+// { approve: false } is passed; pass { verify: false } to leave the email unconfirmed.
+async function signup(role, { approve = true, verify = true, ...extra } = {}) {
   const call = client();
   const res = await call('POST', '/api/signup', {
     email: `${role}${++n}@test.com`,
@@ -63,10 +87,12 @@ async function signup(role, { approve = true, ...extra } = {}) {
     name: `Test ${role}`,
     role,
     businessName: role === 'dealer' ? 'Test Motors' : undefined,
+    acceptTerms: true,
     ...extra,
   });
   assert.equal(res.status, 201, JSON.stringify(res.body));
   call.account = res.body.account;
+  if (verify) await confirmEmail(call, call.account.email);
   if (role === 'dealer' && approve) {
     const approved = await (await admin())('PATCH', `/api/admin/accounts/${call.account.id}`, { status: 'active' });
     assert.equal(approved.status, 200, JSON.stringify(approved.body));
@@ -79,8 +105,9 @@ test('signup validates input and rejects duplicates', async () => {
   assert.equal((await call('POST', '/api/signup', { email: 'x@y.com', password: 'short', name: 'X', role: 'user' })).status, 400);
   assert.equal((await call('POST', '/api/signup', { email: 'x@y.com', password: 'password123', name: 'X', role: 'admin' })).status, 400);
   assert.equal((await call('POST', '/api/signup', { email: 'd@y.com', password: 'password123', name: 'D', role: 'dealer' })).status, 400, 'dealer needs business name');
-  assert.equal((await call('POST', '/api/signup', { email: 'x@y.com', password: 'password123', name: 'X', role: 'user' })).status, 201);
-  assert.equal((await client()('POST', '/api/signup', { email: 'X@Y.com', password: 'password123', name: 'X', role: 'user' })).status, 409);
+  assert.equal((await call('POST', '/api/signup', { email: 'x@y.com', password: 'password123', name: 'X', role: 'user' })).status, 400, 'must accept terms');
+  assert.equal((await call('POST', '/api/signup', { email: 'x@y.com', password: 'password123', name: 'X', role: 'user', acceptTerms: true })).status, 201);
+  assert.equal((await client()('POST', '/api/signup', { email: 'X@Y.com', password: 'password123', name: 'X', role: 'user', acceptTerms: true })).status, 409);
 });
 
 test('login, me and logout', async () => {
@@ -239,9 +266,11 @@ test('new dealers wait for admin approval before seeing requests', async () => {
   assert.equal(dealer.account.status, 'pending');
   assert.equal(dealer.account.isAdmin, false);
   await new Promise((r) => setTimeout(r, 20));
-  assert.deepEqual(sentEmails.map((e) => e.to).sort(), ['admin@test.com', 'boss@test.com'], 'every admin is told');
-  assert.match(sentEmails[0].subject, /Rally Imports/);
-  assert.match(sentEmails[0].text, /555-0111/);
+  const alerts = sentEmails.filter((e) => /waiting for approval/.test(e.subject));
+  assert.deepEqual(alerts.map((e) => e.to).sort(), ['admin@test.com', 'boss@test.com'], 'every admin is told');
+  assert.ok(sentEmails.some((e) => e.to === 'rally@test.com' && /Confirm your/.test(e.subject)), 'dealer is asked to confirm');
+  assert.match(alerts[0].subject, /Rally Imports/);
+  assert.match(alerts[0].text, /555-0111/);
 
   // Pending dealers can log in but cannot see or answer requests.
   assert.equal((await dealer('GET', '/api/me')).body.account.status, 'pending');
@@ -291,7 +320,7 @@ test('new dealers wait for admin approval before seeing requests', async () => {
 
 test('an admin who signs up as a dealer is approved automatically', async () => {
   const res = await client()('POST', '/api/signup', {
-    email: 'Boss@test.com', password: 'password123', name: 'Boss', role: 'dealer', businessName: 'Boss Cars',
+    email: 'Boss@test.com', password: 'password123', name: 'Boss', role: 'dealer', businessName: 'Boss Cars', acceptTerms: true,
   });
   assert.equal(res.status, 201);
   assert.equal(res.body.account.status, 'active');
@@ -320,8 +349,9 @@ test('upgrading an existing database keeps existing dealers approved', async () 
   old.close();
 
   const db = openDatabase(file);
-  const row = db.prepare("SELECT status, frozen_at, last_login_at FROM accounts WHERE email = 'old@dealer.com'").get();
+  const row = db.prepare("SELECT status, frozen_at, last_login_at, email_verified_at FROM accounts WHERE email = 'old@dealer.com'").get();
   assert.equal(row.status, 'active');
+  assert.ok(row.email_verified_at, 'existing accounts count as confirmed');
   assert.equal(row.frozen_at, null);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM visible_requests').get().n, 1, 'old requests stay visible');
   assert.ok(db.prepare('PRAGMA table_info(requests)').all().some((c) => c.name === 'hidden_at'));
@@ -486,4 +516,118 @@ test('admins can list, edit, hide and delete any request', async () => {
   assert.equal((await adminCall('GET', `/api/admin/accounts/${dealer.account.id}`)).body.responses.length, 0, 'responses removed too');
   assert.equal((await adminCall('DELETE', `/api/admin/requests/${id}`)).status, 404);
   assert.equal((await buyer('DELETE', `/api/admin/requests/1`)).status, 403);
+});
+
+test('new accounts must confirm their email before posting or responding', async () => {
+  const buyer = await signup('user', { verify: false, email: 'unverified@test.com' });
+  assert.equal(buyer.account.emailVerified, false);
+  const blocked = await buyer('POST', '/api/requests', { make: 'Porsche', model: '959' });
+  assert.equal(blocked.status, 403);
+  assert.match(blocked.body.error, /confirm your email/);
+
+  const dealer = await signup('dealer', { verify: false, email: 'unverified-dealer@test.com' });
+  const poster = await signup('user');
+  const { body } = await poster('POST', '/api/requests', { make: 'Porsche', model: '959 Komfort' });
+  assert.equal((await dealer('GET', `/api/requests?q=Komfort`)).body.total, 1, 'unverified dealers can still browse');
+  assert.equal((await dealer('POST', `/api/requests/${body.request.id}/responses`, { message: 'hi' })).status, 403);
+
+  // Resend issues a fresh link and the old one stops working.
+  const firstToken = await tokenFromEmail('unverified@test.com', 'verify');
+  assert.equal((await buyer('POST', '/api/verify/resend')).status, 200);
+  const secondToken = await tokenFromEmail('unverified@test.com', 'verify');
+  assert.notEqual(firstToken, secondToken);
+  assert.equal((await client()('POST', '/api/verify', { token: firstToken })).status, 400);
+
+  // The link works without being signed in, and only once.
+  assert.equal((await client()('POST', '/api/verify', { token: secondToken })).status, 200);
+  assert.equal((await client()('POST', '/api/verify', { token: secondToken })).status, 400);
+  assert.equal((await client()('POST', '/api/verify', { token: 'garbage' })).status, 400);
+  assert.equal((await buyer('GET', '/api/me')).body.account.emailVerified, true);
+  assert.equal((await buyer('POST', '/api/requests', { make: 'Porsche', model: '959' })).status, 201);
+  assert.equal((await buyer('POST', '/api/verify/resend')).body.alreadyVerified, true);
+
+  // Admins can confirm an address by hand.
+  const adminCall = await admin();
+  const marked = await adminCall('PATCH', `/api/admin/accounts/${dealer.account.id}`, { verified: true });
+  assert.equal(marked.body.account.emailVerified, true);
+  assert.ok(marked.body.account.termsAcceptedAt);
+  assert.equal((await dealer('POST', `/api/requests/${body.request.id}/responses`, { message: 'hi' })).status, 201);
+});
+
+test('forgot password emails a one-time link that sets a new password', async () => {
+  const user = await signup('user', { email: 'forgetful@test.com' });
+  const other = client();
+  await other('POST', '/api/login', { email: 'forgetful@test.com', password: 'password123' });
+
+  // Same answer whether or not the account exists, and no email for unknown addresses.
+  sentEmails.length = 0;
+  assert.deepEqual((await client()('POST', '/api/password/forgot', { email: 'nobody@test.com' })).body, { ok: true });
+  await tick();
+  assert.equal(sentEmails.length, 0);
+  assert.deepEqual((await client()('POST', '/api/password/forgot', { email: 'Forgetful@test.com' })).body, { ok: true });
+  const token = await tokenFromEmail('forgetful@test.com', 'reset');
+
+  const anon = client();
+  assert.equal((await anon('POST', '/api/password/reset', { token, password: 'short' })).status, 400);
+  const reset = await anon('POST', '/api/password/reset', { token, password: 'new-password-1' });
+  assert.equal(reset.status, 200);
+  assert.equal(reset.body.account.email, 'forgetful@test.com', 'signed in after resetting');
+  assert.equal((await anon('GET', '/api/me')).body.account.email, 'forgetful@test.com');
+  assert.equal((await anon('POST', '/api/password/reset', { token, password: 'another-pass' })).status, 400, 'one use only');
+
+  assert.equal((await user('GET', '/api/me')).body.account, null, 'old sessions are signed out');
+  assert.equal((await other('GET', '/api/me')).body.account, null);
+  assert.equal((await client()('POST', '/api/login', { email: 'forgetful@test.com', password: 'password123' })).status, 401);
+  assert.equal((await client()('POST', '/api/login', { email: 'forgetful@test.com', password: 'new-password-1' })).status, 200);
+});
+
+test('reset links expire and stop working after a newer one is sent', async () => {
+  await signup('user', { email: 'expiry@test.com' });
+  await client()('POST', '/api/password/forgot', { email: 'expiry@test.com' });
+  const older = await tokenFromEmail('expiry@test.com', 'reset');
+  await client()('POST', '/api/password/forgot', { email: 'expiry@test.com' });
+  const newer = await tokenFromEmail('expiry@test.com', 'reset');
+  assert.equal((await client()('POST', '/api/password/reset', { token: older, password: 'whatever-123' })).status, 400);
+
+  // Simulate an hour passing by rewinding the stored expiry.
+  testDb.prepare("UPDATE tokens SET expires_at = datetime('now', '-1 minute') WHERE purpose = 'reset'").run();
+  const expired = await client()('POST', '/api/password/reset', { token: newer, password: 'whatever-123' });
+  assert.equal(expired.status, 400);
+  assert.match(expired.body.error, /expired/);
+});
+
+test('repeated wrong passwords lock that email out for a while', async () => {
+  await signup('user', { email: 'target@test.com' });
+  const attacker = client();
+  for (let i = 0; i < 5; i++) {
+    assert.equal((await attacker('POST', '/api/login', { email: 'target@test.com', password: `guess-${i}` })).status, 401);
+  }
+  const locked = await attacker('POST', '/api/login', { email: 'target@test.com', password: 'password123' });
+  assert.equal(locked.status, 429, 'even the right password is refused while locked');
+  assert.match(locked.body.error, /Too many attempts.*minutes?/);
+
+  // Reset emails are limited per address too.
+  for (let i = 0; i < 3; i++) assert.equal((await client()('POST', '/api/password/forgot', { email: 'spam@test.com' })).status, 200);
+  assert.equal((await client()('POST', '/api/password/forgot', { email: 'spam@test.com' })).status, 429);
+});
+
+test('admins can download a full database backup', async () => {
+  const adminCall = await admin();
+  const res = await fetch(`${base}/api/admin/backup`, { headers: { Cookie: adminCall.cookie() } });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-disposition'), /attachment; filename="carsfindme-backup-\d{4}-\d{2}-\d{2}\.db"/);
+  const bytes = Buffer.from(await res.arrayBuffer());
+  assert.equal(bytes.subarray(0, 15).toString(), 'SQLite format 3');
+
+  const { DatabaseSync } = await import('node:sqlite');
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const file = `${mkdtempSync(`${tmpdir()}/cf-`)}/b.db`;
+  writeFileSync(file, bytes);
+  const copy = new DatabaseSync(file);
+  assert.ok(copy.prepare("SELECT COUNT(*) AS n FROM accounts WHERE email = 'admin@test.com'").get().n === 1);
+  copy.close();
+
+  const buyer = await signup('user');
+  assert.equal((await buyer('GET', '/api/admin/backup')).status, 403);
 });

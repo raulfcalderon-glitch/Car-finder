@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
 export function hashPassword(password) {
   const salt = randomBytes(16);
@@ -15,4 +15,9 @@ export function verifyPassword(password, stored) {
 
 export function newSessionToken() {
   return randomBytes(32).toString('base64url');
+}
+
+// Email-link tokens are stored hashed; the raw token only ever lives in the email.
+export function hashToken(token) {
+  return createHash('sha256').update(token).digest('hex');
 }

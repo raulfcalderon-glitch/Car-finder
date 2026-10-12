@@ -1,8 +1,16 @@
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hashPassword, verifyPassword, newSessionToken } from './auth.js';
-import { newResponseEmail, newDealerEmail, dealerApprovedEmail } from './email.js';
+import { hashPassword, verifyPassword, newSessionToken, hashToken } from './auth.js';
+import {
+  newResponseEmail,
+  newDealerEmail,
+  dealerApprovedEmail,
+  verifyEmail,
+  passwordResetEmail,
+} from './email.js';
+import { createLimiter } from './ratelimit.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 const MAX_BODY_BYTES = 64 * 1024;
@@ -102,6 +110,8 @@ function serializeAdminAccount(a, isAdmin) {
     frozenAt: a.frozen_at,
     frozenReason: a.frozen_reason,
     lastLoginAt: a.last_login_at,
+    emailVerified: Boolean(a.email_verified_at),
+    termsAcceptedAt: a.terms_accepted_at,
     createdAt: a.created_at,
     isAdmin,
     requestCount: a.request_count ?? undefined,
@@ -224,10 +234,47 @@ const ACCOUNT_COUNTS = `
   (SELECT COUNT(*) FROM requests r WHERE r.user_id = a.id AND r.status = 'open') AS open_request_count,
   (SELECT COUNT(*) FROM responses x WHERE x.dealer_id = a.id) AS response_count`;
 
+const MINUTE = 60_000;
+
+// Abuse limits. Per-email limits are the real protection; per-IP limits are a backstop.
+const DEFAULT_LIMITS = {
+  loginPerAccount: { max: 5, windowMs: 15 * MINUTE }, // wrong passwords per email + IP
+  loginPerIp: { max: 50, windowMs: 15 * MINUTE },
+  emailPerAccount: { max: 3, windowMs: 60 * MINUTE }, // reset / verification emails per address
+  emailPerIp: { max: 20, windowMs: 60 * MINUTE },
+  signupPerIp: { max: 20, windowMs: 60 * MINUTE },
+};
+
+function clientIp(req) {
+  // Render (and Cloudflare in front of it) put the visitor's address first in X-Forwarded-For.
+  return String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+}
+
 export function createApp(
   db,
-  { secureCookies = false, sendEmail = async () => {}, appUrl = 'http://localhost:3000', adminEmails = [] } = {},
+  {
+    secureCookies = false,
+    sendEmail = async () => {},
+    appUrl = 'http://localhost:3000',
+    adminEmails = [],
+    limits = {},
+  } = {},
 ) {
+  const limiter = Object.fromEntries(
+    Object.entries({ ...DEFAULT_LIMITS, ...limits }).map(([name, opts]) => [name, createLimiter(opts)]),
+  );
+
+  // Throws 429 if any of the given limiter keys is over its limit, otherwise counts this attempt.
+  function throttle(checks, { count = true } = {}) {
+    for (const [name, key] of checks) {
+      const wait = limiter[name].blockedFor(key);
+      if (wait) {
+        const minutes = Math.ceil(wait / 60);
+        throw new HttpError(429, `Too many attempts. Please try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+      }
+    }
+    if (count) for (const [name, key] of checks) limiter[name].hit(key);
+  }
   const admins = new Set(adminEmails.map((e) => e.trim().toLowerCase()).filter(Boolean));
   const isAdmin = (account) => admins.has(account.email.toLowerCase());
 
@@ -240,6 +287,7 @@ export function createApp(
       businessName: a.business_name,
       phone: a.phone,
       status: a.status,
+      emailVerified: Boolean(a.email_verified_at),
       isAdmin: isAdmin(a),
     };
   }
@@ -254,9 +302,19 @@ export function createApp(
     accountBySession: db.prepare(
       'SELECT a.* FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token = ? AND a.frozen_at IS NULL',
     ),
-    insertAccount: db.prepare(
-      'INSERT INTO accounts (email, password_hash, name, role, business_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    insertAccount: db.prepare(`
+      INSERT INTO accounts (email, password_hash, name, role, business_name, phone, status, terms_accepted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`),
+    setPassword: db.prepare('UPDATE accounts SET password_hash = ? WHERE id = ?'),
+    markVerified: db.prepare("UPDATE accounts SET email_verified_at = COALESCE(email_verified_at, datetime('now')) WHERE id = ?"),
+    deleteTokens: db.prepare('DELETE FROM tokens WHERE account_id = ? AND purpose = ?'),
+    insertToken: db.prepare(
+      "INSERT INTO tokens (token_hash, account_id, purpose, expires_at) VALUES (?, ?, ?, datetime('now', ?))",
     ),
+    tokenByHash: db.prepare(
+      "SELECT * FROM tokens WHERE token_hash = ? AND purpose = ? AND expires_at > datetime('now')",
+    ),
+    deleteToken: db.prepare('DELETE FROM tokens WHERE token_hash = ?'),
     setAccountStatus: db.prepare('UPDATE accounts SET status = ? WHERE id = ?'),
     freezeAccount: db.prepare("UPDATE accounts SET frozen_at = datetime('now'), frozen_reason = ? WHERE id = ?"),
     unfreezeAccount: db.prepare('UPDATE accounts SET frozen_at = NULL, frozen_reason = NULL WHERE id = ?'),
@@ -329,6 +387,33 @@ export function createApp(
   function requireApproved(account) {
     if (account.status === 'pending') throw new HttpError(403, 'Your dealer account is waiting for approval');
     if (account.status === 'rejected') throw new HttpError(403, 'Your dealer account was not approved');
+  }
+
+  function requireVerified(account) {
+    if (!account.email_verified_at) {
+      throw new HttpError(403, 'Please confirm your email address first — check your inbox for the link we sent.');
+    }
+  }
+
+  // Creates a one-time email link token, replacing any earlier one for the same purpose.
+  function issueToken(accountId, purpose, minutes) {
+    const token = newSessionToken();
+    q.deleteTokens.run(accountId, purpose);
+    q.insertToken.run(hashToken(token), accountId, purpose, `+${minutes} minutes`);
+    return token;
+  }
+
+  // Returns the token's row and burns it, or null if it's unknown, used or expired.
+  function consumeToken(token, purpose) {
+    const row = token ? q.tokenByHash.get(hashToken(String(token)), purpose) : undefined;
+    if (!row) return null;
+    q.deleteToken.run(row.token_hash);
+    return row;
+  }
+
+  function sendVerification(account) {
+    const token = issueToken(account.id, 'verify', 7 * 24 * 60);
+    notify(verifyEmail({ account, link: `${appUrl}/#/verify?token=${token}` }));
   }
 
   function requireAdmin(req) {
@@ -535,12 +620,15 @@ export function createApp(
       if (!role) throw new HttpError(400, 'Account type is required');
       const businessName = str(body.businessName, 'Business name', { required: role === 'dealer', max: 120 });
       const phone = str(body.phone, 'Phone', { max: 40 });
+      if (body.acceptTerms !== true) throw new HttpError(400, 'Please accept the Terms of Service and Privacy Policy');
       if (q.accountByEmail.get(email)) throw new HttpError(409, 'An account with that email already exists');
+      throttle([['signupPerIp', clientIp(req)]]);
 
       const status = role === 'dealer' && !admins.has(email) ? 'pending' : 'active';
       const { lastInsertRowid } = q.insertAccount.run(email, hashPassword(password), name, role, businessName, phone, status);
       const account = q.accountById.get(lastInsertRowid);
       startSession(res, account.id, 201, { account: publicAccount(account) });
+      sendVerification(account);
 
       if (status === 'pending') {
         for (const to of admins) notify(newDealerEmail({ dealer: account, to, appUrl }));
@@ -549,10 +637,19 @@ export function createApp(
 
     ['POST', /^\/api\/login$/, async (req, res) => {
       const body = await readJson(req);
-      const account = q.accountByEmail.get(String(body.email ?? '').trim().toLowerCase());
+      const email = String(body.email ?? '').trim().toLowerCase();
+      const ip = clientIp(req);
+      const checks = [
+        ['loginPerAccount', `${email}|${ip}`],
+        ['loginPerIp', ip],
+      ];
+      throttle(checks, { count: false });
+      const account = q.accountByEmail.get(email);
       if (!account || !verifyPassword(String(body.password ?? ''), account.password_hash)) {
+        throttle(checks); // only failed attempts count
         throw new HttpError(401, 'Incorrect email or password');
       }
+      limiter.loginPerAccount.reset(`${email}|${ip}`);
       if (account.frozen_at) throw new HttpError(403, 'This account has been frozen. Please contact CarsFindMe support.');
       startSession(res, account.id, 200, { account: publicAccount(account) });
     }],
@@ -561,6 +658,57 @@ export function createApp(
       const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
       if (token) q.deleteSession.run(token);
       sendJson(res, 200, { ok: true }, { 'Set-Cookie': `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0` });
+    }],
+
+    // --- email verification & password reset ---
+
+    ['POST', /^\/api\/verify$/, async (req, res) => {
+      const row = consumeToken((await readJson(req)).token, 'verify');
+      if (!row) throw new HttpError(400, 'This link is invalid or has expired. Log in and ask for a new one.');
+      q.markVerified.run(row.account_id);
+      sendJson(res, 200, { ok: true });
+    }],
+
+    ['POST', /^\/api\/verify\/resend$/, async (req, res) => {
+      const account = currentAccount(req);
+      if (!account) throw new HttpError(401, 'Please log in');
+      if (account.email_verified_at) return sendJson(res, 200, { ok: true, alreadyVerified: true });
+      throttle([
+        ['emailPerAccount', `verify:${account.id}`],
+        ['emailPerIp', clientIp(req)],
+      ]);
+      sendVerification(account);
+      sendJson(res, 200, { ok: true });
+    }],
+
+    // Always answers the same way, so it can't be used to find out who has an account.
+    ['POST', /^\/api\/password\/forgot$/, async (req, res) => {
+      const email = str((await readJson(req)).email, 'Email', { required: true, max: 200 }).toLowerCase();
+      throttle([
+        ['emailPerAccount', `reset:${email}`],
+        ['emailPerIp', clientIp(req)],
+      ]);
+      const account = q.accountByEmail.get(email);
+      sendJson(res, 200, { ok: true });
+      if (account) {
+        const token = issueToken(account.id, 'reset', 60);
+        notify(passwordResetEmail({ account, link: `${appUrl}/#/reset?token=${token}` }));
+      }
+    }],
+
+    ['POST', /^\/api\/password\/reset$/, async (req, res) => {
+      const body = await readJson(req);
+      const password = String(body.password ?? '');
+      if (password.length < 8) throw new HttpError(400, 'Password must be at least 8 characters');
+      const row = consumeToken(body.token, 'reset');
+      if (!row) throw new HttpError(400, 'This reset link is invalid or has expired. Please ask for a new one.');
+
+      q.setPassword.run(hashPassword(password), row.account_id);
+      q.markVerified.run(row.account_id); // they proved they own the inbox
+      q.deleteSessionsFor.run(row.account_id); // sign out everywhere else
+      const account = q.accountById.get(row.account_id);
+      if (account.frozen_at) return sendJson(res, 200, { ok: true, account: null });
+      startSession(res, account.id, 200, { ok: true, account: publicAccount(account) });
     }],
 
     ['GET', /^\/api\/me$/, async (req, res) => {
@@ -572,6 +720,7 @@ export function createApp(
 
     ['POST', /^\/api\/requests$/, async (req, res) => {
       const account = requireAccount(req, 'user');
+      requireVerified(account);
       const fields = parseRequestFields(await readJson(req));
       const { lastInsertRowid } = q.insertRequest.run({ ...fields, user_id: account.id });
       sendJson(res, 201, { request: serializeRequest(loadRequest(lastInsertRowid)) });
@@ -611,6 +760,7 @@ export function createApp(
 
     ['POST', /^\/api\/requests\/(\d+)\/responses$/, async (req, res, [id]) => {
       const account = requireAccount(req, 'dealer');
+      requireVerified(account);
       const request = loadRequest(Number(id));
       assertVisibleToDealers(request);
       if (request.status !== 'open') throw new HttpError(409, 'This request is no longer open');
@@ -624,6 +774,25 @@ export function createApp(
     }],
 
     // --- admin ---
+
+    // A consistent copy of the whole database, for safekeeping.
+    ['GET', /^\/api\/admin\/backup$/, async (req, res) => {
+      requireAdmin(req);
+      const dir = await mkdtemp(join(tmpdir(), 'carsfindme-backup-'));
+      const file = join(dir, 'backup.db');
+      try {
+        db.prepare('VACUUM INTO ?').run(file);
+        const body = await readFile(file);
+        res.writeHead(200, {
+          'Content-Type': 'application/vnd.sqlite3',
+          'Content-Disposition': `attachment; filename="carsfindme-backup-${new Date().toISOString().slice(0, 10)}.db"`,
+          'Cache-Control': 'no-store',
+        });
+        res.end(body);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }],
 
     ['GET', /^\/api\/admin\/stats$/, async (req, res) => {
       requireAdmin(req);
@@ -671,6 +840,7 @@ export function createApp(
       } else if (body.frozen === false) {
         q.unfreezeAccount.run(target.id);
       }
+      if (body.verified === true) q.markVerified.run(target.id);
 
       sendJson(res, 200, { account: adminAccountPayload(target.id) });
       if (body.status === 'active' && target.status !== 'active') notify(dealerApprovedEmail({ dealer: target, appUrl }));

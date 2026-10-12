@@ -110,3 +110,37 @@ export function dealerApprovedEmail({ dealer, appUrl }) {
       <p style="color:#5f6b7a;font-size:13px">— CarsFindMe</p>`),
   };
 }
+
+// Email asking a new account to confirm their address.
+export function verifyEmail({ account, link }) {
+  return {
+    to: account.email,
+    subject: 'Confirm your CarsFindMe email',
+    text:
+      `Hi ${account.name.split(/\s+/)[0]},\n\n` +
+      `Please confirm your email address to finish setting up your CarsFindMe account:\n${link}\n\n` +
+      `This link works for 7 days. If you didn't sign up, you can ignore this email.\n— CarsFindMe`,
+    html: wrap(`
+      <p>Hi ${esc(account.name.split(/\s+/)[0])},</p>
+      <p>Please confirm your email address to finish setting up your CarsFindMe account.</p>
+      <p>${button(link, 'Confirm email')}</p>
+      <p style="color:#5f6b7a;font-size:13px">This link works for 7 days. If you didn't sign up, you can ignore this email.<br>— CarsFindMe</p>`),
+  };
+}
+
+// Email with a link to choose a new password.
+export function passwordResetEmail({ account, link }) {
+  return {
+    to: account.email,
+    subject: 'Reset your CarsFindMe password',
+    text:
+      `Hi ${account.name.split(/\s+/)[0]},\n\n` +
+      `Someone (hopefully you) asked to reset your CarsFindMe password. Choose a new one here:\n${link}\n\n` +
+      `This link works for 1 hour and can only be used once. If you didn't ask for this, you can ignore this email — your password won't change.\n— CarsFindMe`,
+    html: wrap(`
+      <p>Hi ${esc(account.name.split(/\s+/)[0])},</p>
+      <p>Someone (hopefully you) asked to reset your CarsFindMe password.</p>
+      <p>${button(link, 'Choose a new password')}</p>
+      <p style="color:#5f6b7a;font-size:13px">This link works for 1 hour and can only be used once. If you didn't ask for this, you can ignore this email — your password won't change.<br>— CarsFindMe</p>`),
+  };
+}

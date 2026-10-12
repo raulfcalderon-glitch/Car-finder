@@ -7,7 +7,8 @@ const db = openDatabase(process.env.DATABASE_FILE ?? 'data/car-finder.db');
 const password = hashPassword('password123');
 
 const addAccount = db.prepare(`
-  INSERT INTO accounts (email, password_hash, name, role, business_name, phone) VALUES (?, ?, ?, ?, ?, ?)
+  INSERT INTO accounts (email, password_hash, name, role, business_name, phone, email_verified_at, terms_accepted_at)
+  VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
   ON CONFLICT(email) DO UPDATE SET name = excluded.name RETURNING id`);
 
 const buyers = [
