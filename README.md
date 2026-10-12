@@ -6,6 +6,7 @@ A two-sided marketplace for enthusiast cars — 911s, BMW M cars, special editio
 - **Dealers** (specialty dealerships, brokers, people in the car business) are approved by an admin, then browse every open request in a searchable, sortable list and respond with what they have and an asking price.
 - **Admins** see every user and dealer with activity and last login, approve dealers, **edit, hide or delete any request**, and **freeze** accounts: a frozen account is signed out and can't sign in, a frozen user's requests are hidden from dealers, and a frozen dealer's responses are hidden from buyers.
 - **Accounts:** signup requires accepting the Terms and Privacy Policy and confirming the email address (needed before posting a request or responding); "forgot password" emails a one-hour, single-use reset link; repeated wrong passwords lock that email out for 15 minutes.
+- **Dealer alerts:** approved dealers get an email for each new request — all of them, only certain makes, or off, with an optional minimum budget (set on the **Alerts** page). Emails include a one-click unsubscribe (also via mail apps' `List-Unsubscribe`).
 - Buyers get an **email alert** when a dealer responds, and see each response with the dealer's contact details. Dealers only see a buyer's first name and only their own responses, not competitors'.
 
 ## Run it
@@ -51,6 +52,8 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 | --- | --- | --- | --- |
 | POST | `/api/signup`, `/api/login`, `/api/logout` | anyone | Accounts (`role` is `user` or `dealer`; signup needs `acceptTerms: true`) |
 | GET | `/api/me` | anyone | Current account |
+| PUT | `/api/me/alerts` | dealer | Alert settings: `mode` (`all`, `makes`, `off`), `makes` (list or comma-separated), `minBudget` |
+| POST | `/api/alerts/unsubscribe?token=` | anyone | Turn off a dealer's alerts from an email link |
 | POST | `/api/verify` | anyone | Confirm an email address with the emailed `token` |
 | POST | `/api/verify/resend` | signed in | Send a new confirmation email |
 | POST | `/api/password/forgot` | anyone | Email a reset link (same response whether or not the account exists) |
@@ -75,6 +78,6 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 
 ## Ideas for next steps
 
-- Email alerts to dealers when a new request matches a saved search; SMS alerts.
+- SMS alerts; a daily digest option for dealer alerts.
 - Photos on dealer responses, and in-app messaging instead of sharing contact details.
 - Deploy behind HTTPS (e.g. Fly.io, Render, Railway) with a persistent volume for the SQLite file, or move to Postgres.

@@ -631,3 +631,69 @@ test('admins can download a full database backup', async () => {
   const buyer = await signup('user');
   assert.equal((await buyer('GET', '/api/admin/backup')).status, 403);
 });
+
+test('dealers get new-request alerts that match their settings', async () => {
+  const buyer = await signup('user');
+  const everything = await signup('dealer', { email: 'alerts-all@test.com' });
+  const porscheOnly = await signup('dealer', { email: 'alerts-porsche@test.com' });
+  const bigTicket = await signup('dealer', { email: 'alerts-big@test.com' });
+  const muted = await signup('dealer', { email: 'alerts-off@test.com' });
+  await signup('dealer', { email: 'alerts-pending@test.com', approve: false });
+  await signup('dealer', { email: 'alerts-unverified@test.com', verify: false });
+
+  assert.deepEqual((await everything('GET', '/api/me')).body.account.alerts, { mode: 'all', makes: [], minBudget: null });
+  assert.equal((await porscheOnly('PUT', '/api/me/alerts', { mode: 'makes', makes: 'Porsche, porsche , Mercedes' })).status, 200);
+  assert.deepEqual((await porscheOnly('GET', '/api/me')).body.account.alerts.makes, ['porsche', 'mercedes']);
+  await bigTicket('PUT', '/api/me/alerts', { mode: 'all', minBudget: 100000 });
+  await muted('PUT', '/api/me/alerts', { mode: 'off' });
+  assert.equal((await porscheOnly('PUT', '/api/me/alerts', { mode: 'makes', makes: '' })).status, 400);
+  assert.equal((await porscheOnly('PUT', '/api/me/alerts', { mode: 'sometimes' })).status, 400);
+  assert.equal((await buyer('PUT', '/api/me/alerts', { mode: 'all' })).status, 403);
+
+  const alertsFor = async (make, model, maxBudget) => {
+    sentEmails.length = 0;
+    await buyer('POST', '/api/requests', { make, model, maxBudget });
+    await tick();
+    // Dealers from earlier tests get alerts too (on by default); look only at this test's dealers.
+    return sentEmails
+      .filter((e) => e.subject.startsWith('New request') && e.to.startsWith('alerts-'))
+      .map((e) => e.to)
+      .sort();
+  };
+
+  assert.deepEqual(await alertsFor('Porsche', '911 GT3', 180000), ['alerts-all@test.com', 'alerts-big@test.com', 'alerts-porsche@test.com']);
+  assert.deepEqual(await alertsFor('BMW', 'M3', 60000), ['alerts-all@test.com']);
+  assert.deepEqual(await alertsFor('Mercedes-Benz', '190E', null), ['alerts-all@test.com', 'alerts-big@test.com', 'alerts-porsche@test.com'],
+    'loose make match, and no budget counts as a match');
+
+  // The email has the details, a link, and a working one-click unsubscribe.
+  sentEmails.length = 0;
+  await buyer('POST', '/api/requests', { make: 'Porsche', model: '993 RS', maxBudget: 250000, notes: 'Riviera Blue' });
+  await tick();
+  const email = sentEmails.find((e) => e.to === 'alerts-porsche@test.com');
+  assert.equal(email.subject, 'New request: Porsche 993 RS — up to $250,000');
+  assert.match(email.text, /Riviera Blue/);
+  assert.match(email.text, /https:\/\/cars\.test\/#\/request\/\d+/);
+  const unsubscribeUrl = email.headers['List-Unsubscribe'].slice(1, -1);
+  assert.equal(email.headers['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click');
+
+  // Mail apps POST to the header URL with a form body.
+  const oneClick = await fetch(unsubscribeUrl.replace('https://cars.test', base), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'List-Unsubscribe=One-Click',
+  });
+  assert.equal(oneClick.status, 200);
+  assert.equal((await porscheOnly('GET', '/api/me')).body.account.alerts.mode, 'off');
+  assert.deepEqual(await alertsFor('Porsche', 'Carrera GT', 1500000), ['alerts-all@test.com', 'alerts-big@test.com']);
+
+  // The visible link in the email works too (via the page, which posts the token).
+  const token = email.text.match(/#\/unsubscribe\?token=([\w-]+)/)[1];
+  assert.equal((await client()('POST', '/api/alerts/unsubscribe', { token })).status, 200);
+  assert.equal((await client()('POST', '/api/alerts/unsubscribe', { token: 'nope' })).status, 400);
+
+  // Frozen dealers don't get alerts.
+  const adminCall = await admin();
+  await adminCall('PATCH', `/api/admin/accounts/${everything.account.id}`, { frozen: true });
+  assert.deepEqual(await alertsFor('Ferrari', 'F50', 5000000), ['alerts-big@test.com']);
+});

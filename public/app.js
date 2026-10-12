@@ -91,8 +91,8 @@ function renderNav() {
   const links =
     me.role === 'dealer'
       ? me.status === 'active'
-        ? `<a href="#/browse">Browse requests</a>`
-        : ''
+        ? `<a href="#/browse">Browse requests</a><a href="#/alerts">Alerts</a>`
+        : `<a href="#/alerts">Alerts</a>`
       : `<a href="#/my">My requests</a><a href="#/new">New request</a>`;
   nav.innerHTML = `${links}${me.isAdmin ? `<a href="#/admin">Admin</a>` : ''}
     <span class="who">${esc(me.businessName || me.name)} · ${me.role === 'dealer' ? 'Dealer' : 'Buyer'}</span>
@@ -260,6 +260,60 @@ function legalPage(title, html) {
       ${html}
     </article>`;
   window.scrollTo(0, 0);
+}
+
+function alertSettingsPage() {
+  const { mode, makes, minBudget } = me.alerts;
+  view.innerHTML = `
+    <div class="card" style="max-width:640px;margin:0 auto">
+      <h1>New-request alerts</h1>
+      <p class="muted">Get an email the moment a buyer posts a request you can help with.${
+        me.status === 'active' ? '' : ' Alerts start once your dealer account is approved.'
+      }</p>
+      <form>
+        <fieldset class="stack">
+          <label><input type="radio" name="mode" value="all" ${mode === 'all' ? 'checked' : ''}> <span><strong>Every new request</strong></span></label>
+          <label><input type="radio" name="mode" value="makes" ${mode === 'makes' ? 'checked' : ''}> <span><strong>Only these makes</strong></span></label>
+          <label class="makes-field">Makes <span class="hint">separate with commas — e.g. Porsche, BMW, Ferrari</span>
+            <input name="makes" placeholder="Porsche, BMW, Mercedes-Benz" value="${esc(makes.map(titleCase).join(', '))}">
+          </label>
+          <label><input type="radio" name="mode" value="off" ${mode === 'off' ? 'checked' : ''}> <span><strong>Off</strong> — no alert emails</span></label>
+        </fieldset>
+        <label class="budget-field">Only if the budget is at least (USD) <span class="hint">optional — requests without a budget are always included</span>
+          <input name="minBudget" type="number" min="0" step="1000" placeholder="50000" value="${esc(minBudget ?? '')}">
+        </label>
+        <p class="error"></p>
+        <div class="row"><button type="submit">Save alert settings</button><span class="muted" id="saved"></span></div>
+      </form>
+    </div>`;
+  const form = view.querySelector('form');
+  const sync = () => {
+    form.querySelector('.makes-field').hidden = form.mode.value !== 'makes';
+    form.querySelector('.budget-field').hidden = form.mode.value === 'off';
+  };
+  form.addEventListener('change', sync);
+  sync();
+  bindForm(form, async (data) => {
+    me = (await api('/api/me/alerts', { method: 'PUT', body: data })).account;
+    view.querySelector('#saved').textContent = 'Saved ✓';
+  });
+}
+
+const titleCase = (s) => s.replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\bBmw\b/, 'BMW').replace(/\bAmg\b/, 'AMG');
+
+async function unsubscribePage(params) {
+  try {
+    await api('/api/alerts/unsubscribe', { method: 'POST', body: { token: params.get('token') } });
+    if (me) me = (await api('/api/me')).account;
+    view.innerHTML = `
+      <div class="narrow card" style="text-align:center">
+        <h1>You're unsubscribed</h1>
+        <p>You won't get new-request alert emails anymore. You'll still get emails about your own account.</p>
+        <p class="muted">Changed your mind? Turn alerts back on from <a href="#/alerts">Alerts</a> after logging in.</p>
+      </div>`;
+  } catch (err) {
+    view.innerHTML = `<div class="narrow card" style="text-align:center"><h1>Something's not right</h1><p>${esc(err.message)}</p></div>`;
+  }
 }
 
 // Reminder for signed-in people who haven't confirmed their email yet.
@@ -1014,6 +1068,7 @@ async function render() {
     '/privacy': () => legalPage('Privacy Policy', PRIVACY_HTML),
     '/verify': verifyEmailPage,
     '/reset': resetPassword,
+    '/unsubscribe': unsubscribePage,
   };
   if (path in openRoutes) return openRoutes[path](params);
 
@@ -1027,6 +1082,7 @@ async function render() {
 
   try {
     if (me.isAdmin && path === '/admin') return await admin(params);
+    if (me.role === 'dealer' && path === '/alerts') return alertSettingsPage();
     const adminDetail = path.match(/^\/admin\/account\/(\d+)$/);
     if (me.isAdmin && adminDetail) return await adminAccount(adminDetail[1]);
     if (me.isAdmin && path === '/admin/requests') return await adminRequests(params);

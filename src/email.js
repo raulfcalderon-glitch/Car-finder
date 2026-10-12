@@ -5,7 +5,7 @@ const esc = (v) =>
   String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 export function createMailer({ apiKey, from, log = console } = {}) {
-  return async function sendEmail({ to, subject, text, html, replyTo }) {
+  return async function sendEmail({ to, subject, text, html, replyTo, headers }) {
     if (!apiKey) {
       log.log(`[email not sent: RESEND_API_KEY not set] to=${to} subject="${subject}"\n${text}`);
       return;
@@ -13,7 +13,7 @@ export function createMailer({ apiKey, from, log = console } = {}) {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, subject, text, html, reply_to: replyTo }),
+      body: JSON.stringify({ from, to, subject, text, html, reply_to: replyTo, headers }),
     });
     if (!res.ok) throw new Error(`Resend responded ${res.status}: ${await res.text()}`);
   };
@@ -142,5 +142,42 @@ export function passwordResetEmail({ account, link }) {
       <p>Someone (hopefully you) asked to reset your CarsFindMe password.</p>
       <p>${button(link, 'Choose a new password')}</p>
       <p style="color:#5f6b7a;font-size:13px">This link works for 1 hour and can only be used once. If you didn't ask for this, you can ignore this email — your password won't change.<br>— CarsFindMe</p>`),
+  };
+}
+
+// Email to a dealer when a buyer posts a request matching their alert settings.
+export function newRequestAlertEmail({ dealer, request, link, settingsLink, unsubscribeLink, unsubscribeUrl }) {
+  const vehicle = vehicleName(request);
+  const years =
+    request.year_min && request.year_max && request.year_min !== request.year_max
+      ? `${request.year_min}–${request.year_max}`
+      : request.year_min || request.year_max || null;
+  const facts = [
+    ['Years', years],
+    ['Trim / variant', request.trim],
+    ['Budget', request.max_budget != null ? `up to ${money(request.max_budget)}` : null],
+    ['Color', request.color],
+    ['Location', request.location],
+  ].filter(([, v]) => v);
+
+  return {
+    to: dealer.email,
+    subject: `New request: ${vehicle}${request.max_budget != null ? ` — up to ${money(request.max_budget)}` : ''}`,
+    // Lets mail apps show their own "Unsubscribe" button that works in one click.
+    headers: { 'List-Unsubscribe': `<${unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+    text:
+      `A buyer on CarsFindMe is looking for a ${vehicle}.\n\n` +
+      facts.map(([k, v]) => `${k}: ${v}`).join('\n') +
+      (request.notes ? `\n\nNotes: ${request.notes}` : '') +
+      `\n\nView and respond: ${link}\n\n` +
+      `Change which requests you hear about: ${settingsLink}\nUnsubscribe from these alerts: ${unsubscribeLink}\n— CarsFindMe`,
+    html: wrap(`
+      <p>A buyer on CarsFindMe is looking for a <strong>${esc(vehicle)}</strong>.</p>
+      <table style="border-collapse:collapse;margin:12px 0">${facts
+        .map(([k, v]) => `<tr><td style="color:#5f6b7a;padding:2px 16px 2px 0">${esc(k)}</td><td>${esc(v)}</td></tr>`)
+        .join('')}</table>
+      ${request.notes ? `<blockquote style="margin:0 0 12px;padding:8px 14px;border-left:3px solid #b3261e;background:#f6f7f9;white-space:pre-wrap">${esc(request.notes)}</blockquote>` : ''}
+      <p>${button(link, 'View and respond')}</p>
+      <p style="color:#5f6b7a;font-size:13px"><a href="${esc(settingsLink)}" style="color:#5f6b7a">Change which requests you hear about</a> · <a href="${esc(unsubscribeLink)}" style="color:#5f6b7a">Unsubscribe</a><br>— CarsFindMe</p>`),
   };
 }

@@ -139,3 +139,7 @@ button.small { padding: 4px 10px; font-size: .85rem; }
 label.checkbox { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; }
 label.checkbox input { width: auto; margin-top: 4px; }
 .backup-link { margin-left: auto; font-size: .9rem; }
+fieldset.stack { flex-direction: column; gap: 10px; }
+fieldset.stack label { align-items: center; }
+fieldset.stack .makes-field { display: grid; margin-left: 26px; font-weight: 600; }
+fieldset.stack .makes-field input { width: 100%; }

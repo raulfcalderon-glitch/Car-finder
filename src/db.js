@@ -21,6 +21,11 @@ const SCHEMA = `
     last_login_at TEXT,
     email_verified_at TEXT,
     terms_accepted_at TEXT,
+    -- Dealer new-request alerts: mode 'all' (default), 'makes' (only alert_makes) or 'off'.
+    alert_mode       TEXT,
+    alert_makes      TEXT, -- JSON array of lowercase makes
+    alert_min_budget INTEGER,
+    alert_token      TEXT, -- secret for one-click unsubscribe links
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -109,9 +114,10 @@ function migrate(db) {
     db.exec(`ALTER TABLE accounts ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
       CHECK (status IN ('active', 'pending', 'rejected'))`);
   }
-  for (const column of ['frozen_at', 'frozen_reason', 'last_login_at', 'terms_accepted_at']) {
+  for (const column of ['frozen_at', 'frozen_reason', 'last_login_at', 'terms_accepted_at', 'alert_mode', 'alert_makes', 'alert_token']) {
     if (!columns.includes(column)) db.exec(`ALTER TABLE accounts ADD COLUMN ${column} TEXT`);
   }
+  if (!columns.includes('alert_min_budget')) db.exec('ALTER TABLE accounts ADD COLUMN alert_min_budget INTEGER');
   if (!columns.includes('email_verified_at')) {
     // Accounts created before email verification existed are treated as verified.
     db.exec('ALTER TABLE accounts ADD COLUMN email_verified_at TEXT');

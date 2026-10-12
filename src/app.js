@@ -9,6 +9,7 @@ import {
   dealerApprovedEmail,
   verifyEmail,
   passwordResetEmail,
+  newRequestAlertEmail,
 } from './email.js';
 import { createLimiter } from './ratelimit.js';
 
@@ -289,7 +290,49 @@ export function createApp(
       status: a.status,
       emailVerified: Boolean(a.email_verified_at),
       isAdmin: isAdmin(a),
+      alerts: a.role === 'dealer' ? alertSettings(a) : undefined,
     };
+  }
+
+  function alertSettings(a) {
+    return {
+      mode: a.alert_mode ?? 'all',
+      makes: a.alert_makes ? JSON.parse(a.alert_makes) : [],
+      minBudget: a.alert_min_budget,
+    };
+  }
+
+  // Does this new request match what the dealer asked to hear about?
+  function wantsAlert(dealer, request) {
+    const { mode, makes, minBudget } = alertSettings(dealer);
+    if (mode === 'off') return false;
+    if (minBudget != null && request.max_budget != null && request.max_budget < minBudget) return false;
+    if (mode === 'makes') {
+      // Loose match so "Mercedes" also catches "Mercedes-Benz", and "BMW" catches "bmw".
+      const make = request.make.trim().toLowerCase();
+      return makes.some((m) => make === m || make.includes(m) || m.includes(make));
+    }
+    return true;
+  }
+
+  function alertDealers(request) {
+    for (const dealer of q.alertableDealers.all()) {
+      if (!wantsAlert(dealer, request)) continue;
+      if (!dealer.alert_token) {
+        dealer.alert_token = newSessionToken();
+        q.setAlertToken.run(dealer.alert_token, dealer.id);
+      }
+      notify(
+        newRequestAlertEmail({
+          dealer,
+          request,
+          link: `${appUrl}/#/request/${request.id}`,
+          settingsLink: `${appUrl}/#/alerts`,
+          unsubscribeLink: `${appUrl}/#/unsubscribe?token=${dealer.alert_token}`,
+          unsubscribeUrl: `${appUrl}/api/alerts/unsubscribe?token=${dealer.alert_token}`,
+        }),
+      );
+    }
   }
 
   // Emails go out after the HTTP reply, so a slow or failing provider never blocks or breaks a request.
@@ -315,6 +358,14 @@ export function createApp(
       "SELECT * FROM tokens WHERE token_hash = ? AND purpose = ? AND expires_at > datetime('now')",
     ),
     deleteToken: db.prepare('DELETE FROM tokens WHERE token_hash = ?'),
+    // Approved, confirmed, active dealers who haven't turned alerts off.
+    alertableDealers: db.prepare(`
+      SELECT * FROM accounts
+      WHERE role = 'dealer' AND status = 'active' AND frozen_at IS NULL AND email_verified_at IS NOT NULL
+        AND COALESCE(alert_mode, 'all') != 'off'`),
+    setAlertToken: db.prepare('UPDATE accounts SET alert_token = ? WHERE id = ?'),
+    setAlerts: db.prepare('UPDATE accounts SET alert_mode = ?, alert_makes = ?, alert_min_budget = ? WHERE id = ?'),
+    unsubscribeAlerts: db.prepare("UPDATE accounts SET alert_mode = 'off' WHERE alert_token = ? AND role = 'dealer'"),
     setAccountStatus: db.prepare('UPDATE accounts SET status = ? WHERE id = ?'),
     freezeAccount: db.prepare("UPDATE accounts SET frozen_at = datetime('now'), frozen_reason = ? WHERE id = ?"),
     unfreezeAccount: db.prepare('UPDATE accounts SET frozen_at = NULL, frozen_reason = NULL WHERE id = ?'),
@@ -711,6 +762,38 @@ export function createApp(
       startSession(res, account.id, 200, { ok: true, account: publicAccount(account) });
     }],
 
+    // --- dealer alert settings ---
+
+    ['PUT', /^\/api\/me\/alerts$/, async (req, res) => {
+      const account = currentAccount(req);
+      if (!account) throw new HttpError(401, 'Please log in');
+      if (account.role !== 'dealer') throw new HttpError(403, 'Only dealers have request alerts');
+      const body = await readJson(req);
+      const mode = oneOf(body.mode, 'Alert setting', ['all', 'makes', 'off'], null);
+      if (!mode) throw new HttpError(400, 'Alert setting is required');
+      const makes = [
+        ...new Set(
+          (Array.isArray(body.makes) ? body.makes : String(body.makes ?? '').split(','))
+            .map((m) => String(m).trim().toLowerCase())
+            .filter(Boolean),
+        ),
+      ];
+      if (makes.length > 30 || makes.some((m) => m.length > 40)) throw new HttpError(400, 'Too many makes');
+      if (mode === 'makes' && !makes.length) throw new HttpError(400, 'Add at least one make, or choose "All new requests"');
+      const minBudget = int(body.minBudget, 'Minimum budget', { min: 0, max: 100_000_000 });
+      q.setAlerts.run(mode, JSON.stringify(makes), minBudget, account.id);
+      sendJson(res, 200, { account: publicAccount(q.accountById.get(account.id)) });
+    }],
+
+    // From the link in alert emails, and from mail apps' own one-click "Unsubscribe" button.
+    ['POST', /^\/api\/alerts\/unsubscribe$/, async (req, res, _m, url) => {
+      let token = url.searchParams.get('token');
+      if (!token && String(req.headers['content-type'] ?? '').includes('json')) token = (await readJson(req)).token;
+      const { changes } = token ? q.unsubscribeAlerts.run(String(token)) : { changes: 0 };
+      if (!changes) throw new HttpError(400, 'This unsubscribe link is invalid. You can change alerts from your account instead.');
+      sendJson(res, 200, { ok: true });
+    }],
+
     ['GET', /^\/api\/me$/, async (req, res) => {
       const account = currentAccount(req);
       sendJson(res, 200, { account: account ? publicAccount(account) : null });
@@ -723,7 +806,9 @@ export function createApp(
       requireVerified(account);
       const fields = parseRequestFields(await readJson(req));
       const { lastInsertRowid } = q.insertRequest.run({ ...fields, user_id: account.id });
-      sendJson(res, 201, { request: serializeRequest(loadRequest(lastInsertRowid)) });
+      const request = loadRequest(lastInsertRowid);
+      sendJson(res, 201, { request: serializeRequest(request) });
+      alertDealers(request);
     }],
 
     ['GET', /^\/api\/my\/requests$/, async (req, res) => {
