@@ -329,6 +329,27 @@ function parseSpecialties(value) {
   return out;
 }
 
+const US_STATE_CODES = {
+  Alabama: 'AL', Alaska: 'AK', Arizona: 'AZ', Arkansas: 'AR', California: 'CA', Colorado: 'CO', Connecticut: 'CT',
+  Delaware: 'DE', 'District of Columbia': 'DC', Florida: 'FL', Georgia: 'GA', Hawaii: 'HI', Idaho: 'ID', Illinois: 'IL',
+  Indiana: 'IN', Iowa: 'IA', Kansas: 'KS', Kentucky: 'KY', Louisiana: 'LA', Maine: 'ME', Maryland: 'MD',
+  Massachusetts: 'MA', Michigan: 'MI', Minnesota: 'MN', Mississippi: 'MS', Missouri: 'MO', Montana: 'MT',
+  Nebraska: 'NE', Nevada: 'NV', 'New Hampshire': 'NH', 'New Jersey': 'NJ', 'New Mexico': 'NM', 'New York': 'NY',
+  'North Carolina': 'NC', 'North Dakota': 'ND', Ohio: 'OH', Oklahoma: 'OK', Oregon: 'OR', Pennsylvania: 'PA',
+  'Rhode Island': 'RI', 'South Carolina': 'SC', 'South Dakota': 'SD', Tennessee: 'TN', Texas: 'TX', Utah: 'UT',
+  Vermont: 'VT', Virginia: 'VA', Washington: 'WA', 'West Virginia': 'WV', Wisconsin: 'WI', Wyoming: 'WY',
+};
+const STATE_CODES = new Set(Object.values(US_STATE_CODES));
+
+// Two-letter state for the directory filter: from the profile's "City, ST", else the license state.
+function dealerState(d) {
+  const tail = /,\s*([A-Za-z .]+?)\s*$/.exec(d.city ?? '')?.[1];
+  if (tail && STATE_CODES.has(tail.toUpperCase())) return tail.toUpperCase();
+  const byName = Object.entries(US_STATE_CODES).find(([name]) => name.toLowerCase() === (tail ?? '').toLowerCase());
+  if (byName) return byName[1];
+  return US_STATE_CODES[d.license_state] ?? null;
+}
+
 // What CarsFindMe checked, in words a buyer understands. Never includes the admin's notes.
 function checkedLabels(dealer) {
   const checks = parseChecks(dealer);
@@ -623,6 +644,12 @@ export function createApp(
     galleryPhotoById: db.prepare('SELECT * FROM dealer_photos WHERE id = ?'),
     deleteGalleryPhoto: db.prepare('DELETE FROM dealer_photos WHERE id = ?'),
     dealerResponseCount: db.prepare('SELECT COUNT(*) AS n FROM visible_responses WHERE dealer_id = ?'),
+    // The directory: approved dealers whose profile is public and finished (a logo and a description).
+    listedDealers: db.prepare(`
+      SELECT a.*, (SELECT COUNT(*) FROM visible_responses x WHERE x.dealer_id = a.id) AS response_count
+      FROM accounts a
+      WHERE a.role = 'dealer' AND a.status = 'active' AND a.frozen_at IS NULL AND a.profile_hidden_at IS NULL
+        AND a.profile_slug IS NOT NULL AND a.avatar IS NOT NULL AND TRIM(COALESCE(a.bio, '')) != ''`),
     setDealerApplication: db.prepare(`
       UPDATE accounts SET dealer_type = :dealer_type, job_title = :job_title, business_address = :business_address,
         website = :website, license_number = :license_number, license_state = :license_state, experience = :experience
@@ -1526,6 +1553,49 @@ export function createApp(
       const asOwner = Boolean(viewer && dealer && viewer.id === dealer.id);
       if (!dealer || (!profileIsPublic(dealer) && !asAdmin && !asOwner)) throw new HttpError(404, 'This dealer profile is not available');
       sendJson(res, 200, { profile: dealerProfile(dealer, { forAdmin: asAdmin, forOwner: asOwner }), viewer: asAdmin ? 'admin' : asOwner ? 'owner' : 'public' });
+    }],
+
+    // Public directory of verified dealers, with filters by specialty, state and free text.
+    ['GET', /^\/api\/dealers$/, async (req, res, _m, url) => {
+      const params = url.searchParams;
+      const all = q.listedDealers.all().map((d) => ({
+        slug: d.profile_slug,
+        businessName: d.business_name || d.name,
+        type: d.dealer_type ?? 'dealer',
+        avatarUrl: photoUrl(d.avatar),
+        coverUrl: photoUrl(d.cover),
+        city: d.city,
+        state: dealerState(d),
+        specialties: d.specialties ? JSON.parse(d.specialties) : [],
+        verified: isVerifiedDealer(d),
+        responseCount: d.response_count,
+        memberSince: d.created_at,
+        bio: d.bio,
+      }));
+      // Filter choices come from everyone listed, so they don't shrink as you filter.
+      const counts = {};
+      for (const d of all) for (const sp of d.specialties) counts[sp] = (counts[sp] ?? 0) + 1;
+      const specialties = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, count]) => ({ name, count }));
+      const states = [...new Set(all.map((d) => d.state).filter(Boolean))].sort();
+
+      const specialty = (params.get('specialty') ?? '').trim().toLowerCase();
+      const state = (params.get('state') ?? '').trim().toUpperCase();
+      const words = (params.get('q') ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+      const matches = all.filter((d) => {
+        if (specialty && !d.specialties.some((sp) => sp.toLowerCase() === specialty)) return false;
+        if (state && d.state !== state) return false;
+        const text = [d.businessName, d.city, d.bio, ...d.specialties].join(' ').toLowerCase();
+        return words.every((w) => text.includes(w) || text.includes(standardMake(w).toLowerCase()));
+      });
+      // Verified first, then the most active, then the newest.
+      matches.sort((a, b) => b.verified - a.verified || b.responseCount - a.responseCount || b.memberSince.localeCompare(a.memberSince));
+      const limit = int(params.get('limit'), 'limit', { min: 1, max: 200 }) ?? 200;
+      sendJson(res, 200, {
+        total: all.length,
+        count: matches.length,
+        dealers: matches.slice(0, limit).map(({ bio, ...d }) => ({ ...d, tagline: bio.replace(/\s+/g, ' ').slice(0, 140) })),
+        filters: { specialties, states },
+      });
     }],
 
     ['GET', /^\/api\/me\/profile$/, async (req, res) => {

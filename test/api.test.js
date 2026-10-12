@@ -1337,3 +1337,44 @@ test('approved dealers get a public profile with bio, specialties, cover and gal
   const unknown = await (await fetch(`${base}/d/nobody-here`)).text();
   assert.match(unknown, /og:title" content="CarsFindMe — Tell us the car/);
 });
+
+test('the public dealer directory lists only approved dealers with finished profiles', async () => {
+  const listed = async (path = '/api/dealers') => (await client()('GET', path)).body;
+  const finished = async (name, profile) => {
+    const d = await signup('dealer', { businessName: name });
+    await d('PUT', '/api/me/avatar', { photo: PNG });
+    await d('PUT', '/api/me/profile', profile);
+    return d;
+  };
+  const before = (await listed()).total;
+  const a = await finished('Directory Porsche House', { bio: 'Porsche people.', specialties: ['Porsche', 'Air-cooled 911s'], city: 'Miami, FL' });
+  await finished('Directory JDM Garage', { bio: 'Imports from Japan.', specialties: ['Nissan', 'Toyota'], city: 'Austin, Texas' });
+  const noLogo = await signup('dealer', { businessName: 'Directory No Logo' });
+  await noLogo('PUT', '/api/me/profile', { bio: 'Has a bio but no logo.' });
+  const pending = await signup('dealer', { businessName: 'Directory Pending', approve: false });
+  await pending('PUT', '/api/me/avatar', { photo: PNG });
+  await pending('PUT', '/api/me/profile', { bio: 'Not approved yet.' });
+
+  const all = await listed();
+  assert.equal(all.total, before + 2);
+  const names = all.dealers.map((d) => d.businessName);
+  assert.ok(names.includes('Directory Porsche House') && names.includes('Directory JDM Garage'));
+  assert.ok(!names.includes('Directory No Logo') && !names.includes('Directory Pending'));
+  const card = all.dealers.find((d) => d.businessName === 'Directory Porsche House');
+  assert.equal(card.state, 'FL');
+  assert.equal(card.tagline, 'Porsche people.');
+  assert.equal(card.email, undefined);
+  assert.equal(all.dealers.find((d) => d.businessName === 'Directory JDM Garage').state, 'TX', 'full state names work too');
+  assert.ok(all.filters.states.includes('TX'));
+  assert.ok(all.filters.specialties.some((sp) => sp.name === 'Air-cooled 911s'));
+
+  const bySpecialty = await listed('/api/dealers?specialty=air-cooled%20911s');
+  assert.deepEqual(bySpecialty.dealers.map((d) => d.businessName), ['Directory Porsche House']);
+  assert.ok((await listed('/api/dealers?state=TX')).dealers.every((d) => d.state === 'TX'));
+  assert.ok((await listed('/api/dealers?q=jdm%20austin')).dealers.some((d) => d.businessName === 'Directory JDM Garage'));
+  assert.equal((await listed('/api/dealers?limit=1')).dealers.length, 1);
+
+  // Hidden profiles drop out.
+  await (await admin())('PATCH', `/api/admin/accounts/${a.account.id}`, { profileHidden: true });
+  assert.ok(!(await listed()).dealers.some((d) => d.businessName === 'Directory Porsche House'));
+});

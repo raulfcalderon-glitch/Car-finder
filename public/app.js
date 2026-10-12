@@ -129,7 +129,7 @@ function navItems() {
       ? me.status === 'active'
         ? [['#/browse', 'Requests'], ['#/responses', 'My responses']]
         : []
-      : [['#/my', 'My requests'], ['#/new', 'New request']];
+      : [['#/my', 'My requests'], ['#/new', 'New request'], ['#/dealers', 'Dealers']];
   if (me.isAdmin) items.push(['#/admin', 'Admin']);
   return items;
 }
@@ -138,7 +138,7 @@ const chevron = '<svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><pa
 
 function renderNav() {
   if (!me) {
-    nav.innerHTML = `<a class="nav-login" href="#/login">Log in</a><a class="button" href="#/signup">Sign up</a>`;
+    nav.innerHTML = `<a class="nav-login nav-dealers" href="#/dealers">Dealers</a><a class="nav-login" href="#/login">Log in</a><a class="button" href="#/signup">Sign up</a>`;
     return;
   }
   const path = location.hash.split('?')[0] || '#/';
@@ -337,6 +337,8 @@ function landing() {
       <div class="ticker" id="ticker" hidden aria-label="Latest requests on CarsFindMe"></div>
     </section>
 
+    <section class="section dealer-strip" id="dealer-strip"></section>
+
     <section class="section">
       <h2 class="section-title reveal">How it works</h2>
       <div class="steps">
@@ -385,6 +387,7 @@ function landing() {
           </section>`
     }`;
   loadTicker();
+  loadDealerStrip();
   revealOnScroll();
   bindQuickStart();
 }
@@ -1631,6 +1634,103 @@ async function myResponses() {
 
 // ---------- dealer profiles ----------
 
+// The homepage shows real dealers once there are a few with finished profiles; until then it
+// explains how dealers are verified, so the page never shows a near-empty list.
+const DEALER_STRIP_MIN = 3;
+const VERIFY_STEPS = `
+  <div class="steps verify-steps">
+    <div class="step"><span class="step-n">✓</span><h3>License checked</h3><p class="muted">We look up every dealer's license with the state that issued it.</p></div>
+    <div class="step"><span class="step-n">✓</span><h3>Business confirmed</h3><p class="muted">Website, listings or references have to match who they say they are.</p></div>
+    <div class="step"><span class="step-n">✓</span><h3>Phone call</h3><p class="muted">We call the business at its publicly listed number before approving.</p></div>
+  </div>`;
+
+async function loadDealerStrip() {
+  const box = view.querySelector('#dealer-strip');
+  if (!box) return;
+  const data = await api('/api/dealers?limit=8').catch(() => null);
+  if (!box.isConnected) return;
+  if (!data || data.total < DEALER_STRIP_MIN) {
+    box.innerHTML = `<h2 class="section-title">Every dealer is verified</h2>
+      <p class="section-sub muted">Only dealers who pass our checks can see your request.</p>${VERIFY_STEPS}`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="row spread strip-head">
+      <div>
+        <h2 class="section-title">${data.total} verified specialty dealers are looking for your next car</h2>
+        <p class="section-sub muted">License, business and phone checked by CarsFindMe before they can see a single request.</p>
+      </div>
+      <a class="button secondary" href="#/dealers">See all dealers</a>
+    </div>
+    <div class="dealer-scroller">${data.dealers.map((d) => dealerCard(d, { compact: true })).join('')}</div>`;
+}
+
+function dealerCard(d, { compact = false } = {}) {
+  const chips = d.specialties.slice(0, compact ? 3 : 5);
+  const more = d.specialties.length - chips.length;
+  return `
+    <a class="card dealer-card" href="#/dealer/${esc(d.slug)}">
+      <div class="dealer-card-cover"${d.coverUrl ? ` style="background-image:url('${esc(d.coverUrl)}')"` : ''}></div>
+      <div class="dealer-card-body">
+        ${avatar({ role: 'dealer', businessName: d.businessName, avatarUrl: d.avatarUrl }, 56)}
+        <strong class="dealer-card-name">${esc(d.businessName)}</strong>
+        <div class="dealer-card-meta">${d.verified ? verifiedBadge(d.type) : ''}${d.city ? `<span class="muted">${esc(d.city)}</span>` : ''}</div>
+        ${!compact && d.tagline ? `<p class="muted dealer-card-tagline">${esc(d.tagline)}${d.tagline.length >= 140 ? '…' : ''}</p>` : ''}
+        ${chips.length ? `<div class="specialty-chips">${chips.map((c) => `<span class="specialty">${esc(c)}</span>`).join('')}${more > 0 ? `<span class="specialty muted">+${more}</span>` : ''}</div>` : ''}
+      </div>
+    </a>`;
+}
+
+// Public directory of verified dealers.
+async function dealersPage(params) {
+  const state = { q: params.get('q') ?? '', specialty: params.get('specialty') ?? '', state: params.get('state') ?? '' };
+  const query = new URLSearchParams(Object.entries(state).filter(([, v]) => v)).toString();
+  const data = await api(`/api/dealers${query ? `?${query}` : ''}`);
+  const filtered = Boolean(state.q || state.specialty || state.state);
+  view.innerHTML = `
+    <div class="dealers-head">
+      <h1>Verified dealers</h1>
+      <p class="muted">Specialty dealers and brokers who have passed CarsFindMe's checks. Post a request and the ones who have, or can find, your car will reach out.</p>
+    </div>
+    <form class="filters dealer-filters" id="dealer-filters">
+      <input class="search" name="q" type="search" placeholder="Search: porsche, miami, restoration…" value="${esc(state.q)}">
+      <select name="specialty"><option value="">All specialties</option>${data.filters.specialties
+        .map((sp) => `<option value="${esc(sp.name)}"${sp.name === state.specialty ? ' selected' : ''}>${esc(sp.name)} (${sp.count})</option>`)
+        .join('')}</select>
+      <select name="state"><option value="">All states</option>${data.filters.states
+        .map((st) => `<option${st === state.state ? ' selected' : ''}>${st}</option>`)
+        .join('')}</select>
+    </form>
+    ${
+      data.dealers.length
+        ? `<p class="muted">${data.count} ${data.count === 1 ? 'dealer' : 'dealers'}${filtered ? ` match${data.count === 1 ? 'es' : ''} · <a href="#/dealers">Clear filters</a>` : ''}</p>
+           <div class="dealer-grid">${data.dealers.map((d) => dealerCard(d)).join('')}</div>`
+        : `<div class="card empty">${
+            data.total
+              ? `No dealers match those filters. <a href="#/dealers">See all dealers</a>.`
+              : "We're onboarding our first verified dealers right now. Post your request today and they'll see it as soon as they're approved."
+          }</div>`
+    }
+    ${
+      me?.role === 'dealer'
+        ? ''
+        : `<section class="card dealers-cta">
+            <div><h2>Don't see the car you want?</h2><p class="muted">Post it once. Every verified dealer gets the chance to find it for you.</p></div>
+            <a class="button big" href="${me ? '#/new' : '#/signup?role=user'}">Post a request — it's free</a>
+          </section>`
+    }`;
+  const form = view.querySelector('#dealer-filters');
+  const apply = () => {
+    const next = new URLSearchParams(Object.entries(Object.fromEntries(new FormData(form))).filter(([, v]) => v)).toString();
+    go(`#/dealers${next ? `?${next}` : ''}`);
+  };
+  form.addEventListener('change', apply);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    apply();
+  });
+}
+
 const MAX_GALLERY = 8;
 const instagramUrl = (handle) => `https://instagram.com/${encodeURIComponent(handle)}`;
 const websiteUrl = (site) => (/^https?:\/\//i.test(site) ? site : `https://${site}`);
@@ -2528,6 +2628,7 @@ async function render() {
     '/renew': renewPage,
     '/signup': signup,
     '/contact': contactPage,
+    '/dealers': dealersPage,
   };
   if (path in openRoutes) return openRoutes[path](params);
   const dealerPage = path.match(/^\/dealer\/([a-z0-9-]+)$/);
