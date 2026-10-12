@@ -127,8 +127,8 @@ function navItems() {
   const items =
     me.role === 'dealer'
       ? me.status === 'active'
-        ? [['#/browse', 'Requests'], ['#/responses', 'My responses'], ['#/alerts', 'Alerts']]
-        : [['#/alerts', 'Alerts']]
+        ? [['#/browse', 'Requests'], ['#/responses', 'My responses'], ['#/dealer-profile', 'My profile'], ['#/alerts', 'Alerts']]
+        : [['#/dealer-profile', 'My profile'], ['#/alerts', 'Alerts']]
       : [['#/my', 'My requests'], ['#/new', 'New request']];
   if (me.isAdmin) items.push(['#/admin', 'Admin']);
   return items;
@@ -161,8 +161,7 @@ function renderNav() {
           </div>
         </div>
         <div class="menu-links menu-mobile">${links}</div>
-        <a href="#/profile" role="menuitem">Profile &amp; photo</a>
-        ${me.role === 'dealer' ? '<a href="#/dealer-profile" role="menuitem">Public dealer profile</a>' : ''}
+        <a href="#/profile" role="menuitem">${me.role === 'dealer' ? 'Logo &amp; account' : 'Profile &amp; photo'}</a>
         <a href="#/" role="menuitem">Home</a>
         <a href="#/contact" role="menuitem">Contact us</a>
         <button type="button" id="logout" role="menuitem">Log out</button>
@@ -1124,6 +1123,19 @@ async function myRequests() {
 const BROWSE_DEFAULTS = { q: '', make: '', year: '', condition: '', minBudget: '', status: 'open', sort: 'newest', offset: '0' };
 const PAGE_SIZE = 25;
 
+// Reminds dealers to fill in their public profile until it has a bio or a cover photo.
+async function profileNudge() {
+  const box = view.querySelector('#profile-nudge');
+  if (!box) return;
+  const { profile } = await api('/api/me/profile').catch(() => ({}));
+  if (!profile || profile.bio || profile.coverUrl) return;
+  box.innerHTML = `
+    <div class="owner-bar">
+      <span><strong>Set up your public profile.</strong> Buyers can tap your name on a response to see it. Add a bio, specialties and photos so they know who they're dealing with.</span>
+      <a class="button small" href="#/dealer-profile">Set up profile</a>
+    </div>`;
+}
+
 async function browse(params) {
   const state = Object.fromEntries(Object.entries(BROWSE_DEFAULTS).map(([k, d]) => [k, params.get(k) ?? d]));
   const query = new URLSearchParams(Object.entries(state).filter(([, v]) => v !== ''));
@@ -1138,6 +1150,7 @@ async function browse(params) {
   };
 
   view.innerHTML = `
+    <div id="profile-nudge"></div>
     <div class="row spread" style="margin-bottom:12px">
       <h1 style="margin:0">Buyer requests</h1>
       <span class="muted">${result.total} ${result.total === 1 ? 'match' : 'matches'}</span>
@@ -1212,6 +1225,7 @@ async function browse(params) {
   };
 
   const form = view.querySelector('#filters');
+  profileNudge();
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     update(formData(form));

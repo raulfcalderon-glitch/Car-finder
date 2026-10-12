@@ -402,12 +402,13 @@ async function serveStatic(res, pathname) {
   if (!filePath.startsWith(PUBLIC_DIR) || filePath.includes(`${sep}..`)) throw new HttpError(404, 'Not found');
   try {
     const body = await readFile(filePath);
-    res.writeHead(200, { 'Content-Type': MIME[extname(filePath)] ?? 'application/octet-stream' });
+    // "no-cache" makes browsers check for a newer version on each visit, so updates show up right away.
+    res.writeHead(200, { 'Content-Type': MIME[extname(filePath)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
     res.end(body);
   } catch {
     // Unknown non-API paths fall back to the single-page app.
     const body = await readFile(join(PUBLIC_DIR, 'index.html'));
-    res.writeHead(200, { 'Content-Type': MIME['.html'] });
+    res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' });
     res.end(body);
   }
 }
@@ -903,7 +904,7 @@ export function createApp(
         meta('property', 'og:image:alt', `${name} cover photo`);
       }
     }
-    res.writeHead(200, { 'Content-Type': MIME['.html'] });
+    res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' });
     res.end(html);
   }
 
