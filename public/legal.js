@@ -16,7 +16,8 @@ export const TERMS_HTML = `
 <p>You must be at least 18 and able to form a binding contract. Give accurate information, keep your password secure, and tell us promptly if you think your account has been compromised. You're responsible for activity on your account.</p>
 
 <h2>3. Dealers</h2>
-<p>Dealer accounts are reviewed and approved at our sole discretion, and approval can be withdrawn at any time. Approval is not an endorsement, and we don't verify licensing, bonding or insurance. Dealers must comply with all laws that apply to them, including dealer licensing, advertising, consumer protection and anti-fraud laws, and must only offer vehicles they have the right to sell or source.</p>
+<p>Dealer accounts are reviewed and approved at our sole discretion, and approval can be withdrawn at any time. Before approving a dealer we check certain details, such as their dealer license with the issuing state, their website or references, and their publicly listed phone number. These checks are limited: approval and the "Verified" badge are not an endorsement or a guarantee, and we don't verify bonding, insurance, inventory or every claim a dealer makes. Dealers must comply with all laws that apply to them, including dealer licensing, advertising, consumer protection and anti-fraud laws, and must only offer vehicles they have the right to sell or source.</p>
+<p><strong>Dealer profiles are public.</strong> Everything a dealer adds to their profile (business name, logo, cover and gallery photos, description, specialties, city, year founded, website and Instagram) can be seen by anyone, including people without an account. Dealers must only post photos they own or have permission to use, and must keep their profile accurate.</p>
 
 <h2>4. Do your own due diligence</h2>
 <p>Before paying anything, independently verify the seller, the vehicle and the title. Use a pre-purchase inspection, a reputable escrow service and a vehicle history report. <strong>Never wire money or send a deposit to someone you haven't verified.</strong> Report suspicious behavior to us at <a href="mailto:raulfcalderon@gmail.com">raulfcalderon@gmail.com</a>.</p>
@@ -61,7 +62,8 @@ export const PRIVACY_HTML = `
 
 <h2>1. Information we collect</h2>
 <ul>
-  <li><strong>Account details:</strong> your name, email address and password (stored only as a secure hash). Dealers also provide a business name and, optionally, a phone number.</li>
+  <li><strong>Account details:</strong> your name, email address and password (stored only as a secure hash). Dealers also provide application details we use to verify them (business name, role, phone number, business address, website, dealer license number and state, or a broker's track record and references).</li>
+  <li><strong>Dealer profiles:</strong> what dealers choose to add to their public profile: logo, cover and gallery photos, description, specialties, city, year founded and Instagram handle.</li>
   <li><strong>If you continue with Google:</strong> Google shares your name, email address and a Google account ID with us. We use them only to create your account and sign you in. We don't get your Google password or access to anything else in your Google account.</li>
   <li><strong>What you post:</strong> vehicle requests (make, model, years, budget, condition, color, location, notes) and dealer responses (messages and prices).</li>
   <li><strong>Technical information:</strong> your IP address and basic request details, used to keep the Service secure (for example, to block repeated password guessing), and the date you last signed in.</li>
@@ -80,6 +82,7 @@ export const PRIVACY_HTML = `
   <li><strong>Approved dealers</strong> see your requests and your <strong>first name only</strong>. They don't see your email address or phone number.</li>
   <li><strong>Buyers</strong> who receive a response see that dealer's business name, contact name, email address and phone number, so they can follow up.</li>
   <li>Dealers don't see other dealers' responses.</li>
+  <li><strong>Dealer profiles are public:</strong> anyone, including people without an account, can see an approved dealer's profile: business name, logo, cover and gallery photos, description, specialties, city, year founded, website, Instagram, what CarsFindMe checked, when they joined and how many requests they've answered. Profiles never show a dealer's email address, phone number, license number, street address or the contact person's name. If a profile is shared on social media, that platform may show its name, description and cover photo in a link preview.</li>
   <li><strong>Anyone visiting our homepage</strong> may see the year, make, model and trim of recent open requests (for example, "1987 Porsche 911 Carrera"). We never show your name, location, budget, notes or contact details there.</li>
 </ul>
 
