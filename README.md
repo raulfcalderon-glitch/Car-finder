@@ -56,6 +56,7 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 | --- | --- | --- | --- |
 | POST | `/api/signup`, `/api/login`, `/api/logout` | anyone | Accounts (`role` is `user` or `dealer`; signup needs `acceptTerms: true`) |
 | GET | `/api/me` | anyone | Current account |
+| GET | `/api/public/recent-requests` | anyone | Homepage ticker: year, make, model and trim of the 10 latest open, visible requests (nothing else) |
 | PUT | `/api/me/alerts` | dealer | Alert settings: `mode` (`all`, `makes`, `off`), `makes` (list or comma-separated), `minBudget` |
 | PUT / DELETE | `/api/me/avatar` | signed in | Set (`photo` as an image data URL) or remove your profile picture |
 | POST | `/api/alerts/unsubscribe?token=` | anyone | Turn off a dealer's alerts from an email link |

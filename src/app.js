@@ -565,6 +565,10 @@ export function createApp(
       SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar, a.dealer_type, a.license_number AS dealer_license_number,
         a.verification_checks AS dealer_checks, a.status AS dealer_status
       FROM responses x JOIN accounts a ON a.id = x.dealer_id WHERE x.id = ?`),
+    // Homepage ticker: vehicle basics only — never who posted it, where, or their budget.
+    recentPublicRequests: db.prepare(`
+      SELECT id, make, model, trim, year_min, year_max, created_at FROM visible_requests
+      WHERE status = 'open' ORDER BY created_at DESC, id DESC LIMIT 10`),
     distinctMakes: db.prepare(
       "SELECT DISTINCT make FROM visible_requests WHERE status = 'open' ORDER BY make COLLATE NOCASE",
     ),
@@ -1029,6 +1033,18 @@ export function createApp(
       const { changes } = token ? q.unsubscribeAlerts.run(String(token)) : { changes: 0 };
       if (!changes) throw new HttpError(400, 'This unsubscribe link is invalid. You can change alerts from your account instead.');
       sendJson(res, 200, { ok: true });
+    }],
+
+    ['GET', /^\/api\/public\/recent-requests$/, async (req, res) => {
+      const requests = q.recentPublicRequests.all().map((r) => ({
+        make: r.make,
+        model: r.model,
+        trim: r.trim,
+        yearMin: r.year_min,
+        yearMax: r.year_max,
+        createdAt: r.created_at,
+      }));
+      sendJson(res, 200, { requests });
     }],
 
     ['GET', /^\/api\/me$/, async (req, res) => {

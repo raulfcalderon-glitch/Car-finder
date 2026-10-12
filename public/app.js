@@ -269,8 +269,6 @@ const EXAMPLE_REQUESTS = [
   },
 ];
 
-const MARQUES = ['Porsche', 'BMW M', 'Mercedes-AMG', 'Ferrari', 'Lamborghini', 'McLaren', 'Aston Martin', 'Lotus', 'Audi Sport', 'Acura NSX', 'Land Rover Defender'];
-
 // Homepage calls to action, adjusted for whoever is looking: a visitor, a buyer or a dealer.
 function landingLinks() {
   if (!me) {
@@ -297,7 +295,7 @@ function landing() {
     <section class="hero-band">
       <div class="hero-inner">
         <div class="hero-copy">
-          <p class="eyebrow">For 911s, M cars &amp; the special ones</p>
+          <p class="eyebrow">For enthusiast, collector &amp; special-edition cars</p>
           <h1>Tell us the car.<br>The right dealers <span>find it.</span></h1>
           <p class="lede">Post the exact spec you've been chasing — gearbox, paint, options, provenance — and vetted specialty dealers who have it, or can source it, come to you.</p>
           <div class="row">
@@ -318,7 +316,7 @@ function landing() {
           <p class="spec-note">Example requests</p>
         </div>
       </div>
-      <div class="marques">${MARQUES.map((m) => `<span>${m}</span>`).join('')}</div>
+      <div class="ticker" id="ticker" hidden aria-label="Latest requests on CarsFindMe"></div>
     </section>
 
     <section class="section">
@@ -355,6 +353,7 @@ function landing() {
       <h2>What are you hunting for?</h2>
       ${button(links.closing, 'big')}
     </section>`;
+  loadTicker();
 }
 
 function login() {
@@ -670,6 +669,37 @@ function requestForm({ initial = {}, edit = null } = {}) {
     const { request } = await api('/api/requests', { method: 'POST', body: data });
     go(`#/request/${request.id}`);
   });
+}
+
+// Fills the homepage ticker with the latest requests (vehicle basics only).
+async function loadTicker() {
+  const ticker = view.querySelector('#ticker');
+  if (!ticker) return;
+  let requests = [];
+  try {
+    ({ requests } = await api('/api/public/recent-requests'));
+  } catch {
+    return; // the homepage is fine without it
+  }
+  if (!requests.length) return;
+  const items = requests
+    .map(
+      (r) => `
+      <span class="ticker-item"><span class="ticker-label">Wanted</span>${esc(
+        [r.yearMin && r.yearMin === r.yearMax ? r.yearMin : years(r).replace('Any year', ''), r.make, r.model, r.trim].filter(Boolean).join(' '),
+      )}<span class="ticker-time">${ago(r.createdAt)}</span></span>`,
+    )
+    .join('');
+  // The list is repeated so the scroll can loop without a gap; the copy is hidden from screen readers.
+  ticker.innerHTML = `
+    <div class="ticker-head">Latest requests</div>
+    <div class="ticker-window">
+      <div class="ticker-track" style="--duration:${Math.max(30, requests.length * 6)}s">
+        <div class="ticker-group">${items}</div>
+        <div class="ticker-group" aria-hidden="true">${items}</div>
+      </div>
+    </div>`;
+  ticker.hidden = false;
 }
 
 async function adminEditRequest(id) {

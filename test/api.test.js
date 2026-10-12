@@ -953,3 +953,26 @@ test('buyers can report a dealer; admins are emailed and can resolve reports', a
   assert.equal((await adminCall('GET', `/api/admin/accounts/${dealer.account.id}`)).body.account.dealer.openReports, 0);
   assert.equal((await adminCall('PATCH', '/api/admin/reports/999999', { status: 'resolved' })).status, 404);
 });
+
+test('the homepage ticker shows only vehicle basics of recent visible requests', async () => {
+  const buyer = await signup('user', { name: 'Private Person' });
+  const { body } = await buyer('POST', '/api/requests', {
+    make: 'Lancia', model: 'Stratos', trim: 'HF Stradale', yearMin: 1974, yearMax: 1975,
+    maxBudget: 700000, location: 'Secret Town', notes: 'call me at 555-0000',
+  });
+  const hidden = (await buyer('POST', '/api/requests', { make: 'Hidden', model: 'Car' })).body.request;
+  await (await admin())('PATCH', `/api/admin/requests/${hidden.id}`, { hidden: true });
+
+  const res = await client()('GET', '/api/public/recent-requests'); // no login needed
+  assert.equal(res.status, 200);
+  assert.ok(res.body.requests.length <= 10);
+  const item = res.body.requests.find((r) => r.model === 'Stratos');
+  assert.deepEqual(Object.keys(item).sort(), ['createdAt', 'make', 'model', 'trim', 'yearMax', 'yearMin']);
+  assert.ok(!JSON.stringify(res.body).includes('Secret Town'));
+  assert.ok(!JSON.stringify(res.body).includes('555-0000'));
+  assert.ok(!JSON.stringify(res.body).includes('Private'));
+  assert.ok(!res.body.requests.some((r) => r.make === 'Hidden'), 'hidden requests stay off the homepage');
+
+  await buyer('PATCH', `/api/requests/${body.request.id}`, { status: 'fulfilled' });
+  assert.ok(!(await client()('GET', '/api/public/recent-requests')).body.requests.some((r) => r.model === 'Stratos'), 'only open requests');
+});

@@ -242,11 +242,36 @@ fieldset.stack .makes-field input { width: 100%; }
 .spec-where { font-size: .8rem; color: var(--ink-muted); }
 .spec-note { margin: 2px 0 0; font-size: .75rem; color: var(--ink-muted); text-align: right; }
 
-.marques {
-  max-width: 1100px; margin: 56px auto 0; padding: 22px 0 26px; border-top: 1px solid var(--ink-border);
-  display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 28px;
-  font-family: var(--display); font-stretch: 115%; font-weight: 600; font-size: .9rem; letter-spacing: .04em;
-  text-transform: uppercase; color: var(--ink-muted);
+.ticker {
+  max-width: 1100px; margin: 56px auto 0; padding: 18px 0 22px; border-top: 1px solid var(--ink-border);
+  display: flex; align-items: center; gap: 18px;
+}
+.ticker-head {
+  flex: none; font-size: .72rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-muted);
+}
+.ticker-window {
+  flex: 1; overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+}
+.ticker-track { display: flex; width: max-content; animation: ticker var(--duration, 40s) linear infinite; }
+.ticker:hover .ticker-track { animation-play-state: paused; }
+.ticker-group { display: flex; }
+.ticker-item {
+  display: inline-flex; align-items: center; gap: 10px; padding: 0 28px; white-space: nowrap;
+  font-family: var(--display); font-stretch: 110%; font-weight: 600; font-size: .95rem; color: var(--ink-text);
+  border-right: 1px solid var(--ink-border);
+}
+.ticker-label { font-size: .66rem; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+.ticker-time { font-family: "Inter", system-ui, sans-serif; font-size: .78rem; font-weight: 400; color: var(--ink-muted); }
+@keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (max-width: 640px) { .ticker { flex-direction: column; align-items: flex-start; gap: 10px; } .ticker-window { width: 100%; } }
+/* No motion for people who ask for less: show a wrapped, static list instead. */
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track { animation: none; width: auto; }
+  .ticker-group { flex-wrap: wrap; row-gap: 8px; }
+  .ticker-group[aria-hidden] { display: none; }
+  .ticker-window { -webkit-mask-image: none; mask-image: none; }
 }
 
 .section { padding: 56px 0 8px; }

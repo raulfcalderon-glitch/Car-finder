@@ -78,6 +78,7 @@ export const PRIVACY_HTML = `
   <li><strong>Approved dealers</strong> see your requests and your <strong>first name only</strong>. They don't see your email address or phone number.</li>
   <li><strong>Buyers</strong> who receive a response see that dealer's business name, contact name, email address and phone number, so they can follow up.</li>
   <li>Dealers don't see other dealers' responses.</li>
+  <li><strong>Anyone visiting our homepage</strong> may see the year, make, model and trim of recent open requests (for example, "1987 Porsche 911 Carrera"). We never show your name, location, budget, notes or contact details there.</li>
 </ul>
 
 <h2>4. Who we share it with</h2>
