@@ -32,7 +32,7 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 
 ## Legal pages
 
-`public/legal.js` holds **draft** Terms of Service and Privacy Policy text. Replace the `[BRACKETED]` placeholders and have a lawyer review them before relying on them.
+`public/legal.js` holds **draft** Terms of Service and Privacy Policy text (operator: Raul Calderon, Miami, FL; Florida law). Have a lawyer review them before relying on them, then remove the "Draft — pending legal review" labels.
 
 ## How it's built
 

@@ -1,11 +1,11 @@
 // DRAFT legal pages. Have a lawyer review these before relying on them.
-// Replace every [BRACKETED] placeholder with your real details.
+// Contact details below are the operator's; update them in one place here if they change.
 
 export const LEGAL_UPDATED = 'October 12, 2026';
 
 export const TERMS_HTML = `
 <p class="legal-draft">Draft — pending legal review.</p>
-<p>These Terms of Service ("Terms") govern your use of CarsFindMe at carsfindme.com (the "Service"), operated by [LEGAL ENTITY NAME] ("CarsFindMe", "we", "us"). By creating an account or using the Service you agree to these Terms. If you don't agree, don't use the Service.</p>
+<p>These Terms of Service ("Terms") govern your use of CarsFindMe at carsfindme.com (the "Service"), operated by Raul Calderon ("CarsFindMe", "we", "us"). By creating an account or using the Service you agree to these Terms. If you don't agree, don't use the Service.</p>
 
 <h2>1. What CarsFindMe is — and isn't</h2>
 <p>CarsFindMe is a venue that lets people looking for specific enthusiast vehicles ("Buyers") post requests, and lets approved dealers and industry professionals ("Dealers") respond to them.</p>
@@ -18,7 +18,7 @@ export const TERMS_HTML = `
 <p>Dealer accounts are reviewed and approved at our sole discretion, and approval can be withdrawn at any time. Approval is not an endorsement, and we don't verify licensing, bonding or insurance. Dealers must comply with all laws that apply to them, including dealer licensing, advertising, consumer protection and anti-fraud laws, and must only offer vehicles they have the right to sell or source.</p>
 
 <h2>4. Do your own due diligence</h2>
-<p>Before paying anything, independently verify the seller, the vehicle and the title. Use a pre-purchase inspection, a reputable escrow service and a vehicle history report. <strong>Never wire money or send a deposit to someone you haven't verified.</strong> Report suspicious behavior to us at [CONTACT EMAIL].</p>
+<p>Before paying anything, independently verify the seller, the vehicle and the title. Use a pre-purchase inspection, a reputable escrow service and a vehicle history report. <strong>Never wire money or send a deposit to someone you haven't verified.</strong> Report suspicious behavior to us at <a href="mailto:raulfcalderon@gmail.com">raulfcalderon@gmail.com</a>.</p>
 
 <h2>5. Acceptable use</h2>
 <p>Don't post anything false, misleading, fraudulent, illegal, infringing, abusive or spam. Don't use the Service to collect other users' information for unrelated purposes, scrape it, interfere with it, or try to access accounts or data you aren't authorized to access. Requests should be for genuine specialty, enthusiast or collector vehicles.</p>
@@ -42,21 +42,21 @@ export const TERMS_HTML = `
 <p>You agree to indemnify and hold CarsFindMe harmless from claims, losses and expenses (including reasonable legal fees) arising from your use of the Service, your content, your transactions with other users, or your breach of these Terms.</p>
 
 <h2>12. Ending your use</h2>
-<p>You can stop using the Service at any time and ask us to close your account at [CONTACT EMAIL]. We may suspend or end your access at any time. Sections that by their nature should survive (including 1, 4, 7, 9, 10, 11 and 14) survive termination.</p>
+<p>You can stop using the Service at any time and ask us to close your account at <a href="mailto:raulfcalderon@gmail.com">raulfcalderon@gmail.com</a>. We may suspend or end your access at any time. Sections that by their nature should survive (including 1, 4, 7, 9, 10, 11 and 14) survive termination.</p>
 
 <h2>13. Changes</h2>
 <p>We may update these Terms. If changes are material we'll take reasonable steps to let you know, for example by email or a notice on the site. Continuing to use the Service after changes take effect means you accept them.</p>
 
 <h2>14. Governing law</h2>
-<p>These Terms are governed by the laws of the State of [STATE], without regard to conflict-of-law rules. Disputes will be resolved in the state or federal courts located in [COUNTY, STATE], and you consent to their jurisdiction.</p>
+<p>These Terms are governed by the laws of the State of Florida, without regard to conflict-of-law rules. Disputes will be resolved in the state or federal courts located in Miami-Dade County, Florida, and you consent to their jurisdiction.</p>
 
 <h2>15. Contact</h2>
-<p>[LEGAL ENTITY NAME] · [MAILING ADDRESS] · [CONTACT EMAIL]</p>
+<p>Raul Calderon (CarsFindMe) · 50 SW 19th Rd, Miami, FL 33129 · <a href="mailto:raulfcalderon@gmail.com">raulfcalderon@gmail.com</a></p>
 `;
 
 export const PRIVACY_HTML = `
 <p class="legal-draft">Draft — pending legal review.</p>
-<p>This Privacy Policy explains what information CarsFindMe ("we", "us"), operated by [LEGAL ENTITY NAME], collects through carsfindme.com, how we use it, and the choices you have.</p>
+<p>This Privacy Policy explains what information CarsFindMe ("we", "us"), operated by Raul Calderon, collects through carsfindme.com, how we use it, and the choices you have.</p>
 
 <h2>1. Information we collect</h2>
 <ul>
@@ -92,7 +92,7 @@ export const PRIVACY_HTML = `
 <p>We keep your information while your account is open and for as long as needed for the purposes above, including resolving disputes and enforcing our Terms. Backups are kept for a limited time and then deleted.</p>
 
 <h2>6. Your choices and rights</h2>
-<p>You can ask to access, correct or delete your personal information, or close your account, by emailing [CONTACT EMAIL]. Depending on where you live (for example California or the EU/UK), you may have additional rights; we'll honor them as required by law. We'll never treat you differently for exercising your rights.</p>
+<p>You can ask to access, correct or delete your personal information, or close your account, by emailing <a href="mailto:raulfcalderon@gmail.com">raulfcalderon@gmail.com</a>. Depending on where you live (for example California or the EU/UK), you may have additional rights; we'll honor them as required by law. We'll never treat you differently for exercising your rights.</p>
 
 <h2>7. Security</h2>
 <p>We use reasonable safeguards, including encrypted connections (HTTPS), hashed passwords, and encrypted storage at our hosting provider. No system is perfectly secure, so please use a strong, unique password.</p>
@@ -104,5 +104,5 @@ export const PRIVACY_HTML = `
 <p>We may update this policy. If changes are material we'll let you know, for example by email or a notice on the site.</p>
 
 <h2>10. Contact</h2>
-<p>[LEGAL ENTITY NAME] · [MAILING ADDRESS] · [CONTACT EMAIL]</p>
+<p>Raul Calderon (CarsFindMe) · 50 SW 19th Rd, Miami, FL 33129 · <a href="mailto:raulfcalderon@gmail.com">raulfcalderon@gmail.com</a></p>
 `;
