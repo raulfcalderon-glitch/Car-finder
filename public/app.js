@@ -131,7 +131,28 @@ const EXAMPLE_REQUESTS = [
 
 const MARQUES = ['Porsche', 'BMW M', 'Mercedes-AMG', 'Ferrari', 'Lamborghini', 'McLaren', 'Aston Martin', 'Lotus', 'Audi Sport', 'Acura NSX', 'Land Rover Defender'];
 
+// Homepage calls to action, adjusted for whoever is looking: a visitor, a buyer or a dealer.
+function landingLinks() {
+  if (!me) {
+    return {
+      primary: ['#/signup?role=user', "Post a request — it's free"],
+      secondary: ['#/signup?role=dealer', "I'm a dealer"],
+      buyer: ['#/signup?role=user', 'Post a request'],
+      dealer: ['#/signup?role=dealer', 'Apply as a dealer'],
+      closing: ['#/signup?role=user', 'Post your first request'],
+    };
+  }
+  if (me.role === 'dealer') {
+    const browse = ['#/browse', 'Browse requests'];
+    return { primary: browse, secondary: ['#/alerts', 'Alert settings'], buyer: null, dealer: browse, closing: browse };
+  }
+  const post = ['#/new', 'Post a new request'];
+  return { primary: post, secondary: ['#/my', 'My requests'], buyer: post, dealer: null, closing: post };
+}
+
 function landing() {
+  const links = landingLinks();
+  const button = (link, cls = '') => (link ? `<a class="button ${cls}" href="${link[0]}">${link[1]}</a>` : '');
   view.innerHTML = `
     <section class="hero-band">
       <div class="hero-inner">
@@ -140,8 +161,8 @@ function landing() {
           <h1>Tell us the car.<br>The right dealers <span>find it.</span></h1>
           <p class="lede">Post the exact spec you've been chasing — gearbox, paint, options, provenance — and vetted specialty dealers who have it, or can source it, come to you.</p>
           <div class="row">
-            <a class="button big" href="#/signup?role=user">Post a request — it's free</a>
-            <a class="button big ghost" href="#/signup?role=dealer">I'm a dealer</a>
+            ${button(links.primary, 'big')}
+            ${button(links.secondary, 'big ghost')}
           </div>
         </div>
         <div class="hero-cards" aria-label="Example requests">
@@ -177,7 +198,7 @@ function landing() {
           <li>Your email and phone stay private; dealers only see your first name</li>
           <li>Offers arrive with prices and photos</li>
         </ul>
-        <a class="button" href="#/signup?role=user">Post a request</a>
+        ${button(links.buyer)}
       </div>
       <div class="card audience">
         <h2>For specialty dealers</h2>
@@ -186,13 +207,13 @@ function landing() {
           <li>Alerts for the makes you specialize in</li>
           <li>Respond with a price and photos in a minute</li>
         </ul>
-        <a class="button" href="#/signup?role=dealer">Apply as a dealer</a>
+        ${button(links.dealer)}
       </div>
     </section>
 
     <section class="cta-band">
       <h2>What are you hunting for?</h2>
-      <a class="button big" href="#/signup?role=user">Post your first request</a>
+      ${button(links.closing, 'big')}
     </section>`;
 }
 
@@ -1189,6 +1210,8 @@ async function render() {
 
   // Pages anyone can open, signed in or not.
   const openRoutes = {
+    '': landing,
+    '/': landing,
     '/terms': () => legalPage('Terms of Service', TERMS_HTML),
     '/privacy': () => legalPage('Privacy Policy', PRIVACY_HTML),
     '/verify': verifyEmailPage,
@@ -1198,7 +1221,7 @@ async function render() {
   if (path in openRoutes) return openRoutes[path](params);
 
   // Pages for signed-out visitors only.
-  const guestRoutes = { '': landing, '/': landing, '/login': login, '/signup': signup, '/forgot': forgotPassword };
+  const guestRoutes = { '/login': login, '/signup': signup, '/forgot': forgotPassword };
   if (path in guestRoutes) {
     if (me) return go(home());
     return guestRoutes[path](params);
