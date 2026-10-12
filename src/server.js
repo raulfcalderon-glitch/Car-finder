@@ -20,7 +20,8 @@ console.log(`Database: ${dbFile} (${accounts} accounts)${warning}`);
 const app = createApp(db, {
   secureCookies: process.env.NODE_ENV === 'production',
   // Comma-separated emails of people who can approve dealers, e.g. "you@example.com,partner@example.com".
-  adminEmails: (process.env.ADMIN_EMAILS ?? '').split(','),
+  // ADMIN_EMAIL (singular) is accepted too, since it's an easy name to type.
+  adminEmails: [process.env.ADMIN_EMAILS, process.env.ADMIN_EMAIL].filter(Boolean).join(',').split(','),
   // Render sets RENDER_EXTERNAL_URL automatically; APP_URL overrides it (e.g. for a custom domain).
   appUrl: (process.env.APP_URL ?? process.env.RENDER_EXTERNAL_URL ?? `http://localhost:${port}`).replace(/\/+$/, ''),
   sendEmail: createMailer({
