@@ -122,12 +122,14 @@ export function dealerApprovedEmail({ dealer, appUrl }) {
       `Hi ${dealer.name.split(/\s+/)[0]},\n\n` +
       `Your dealer account${dealer.business_name ? ` for ${dealer.business_name}` : ''} has been approved. ` +
       `You can now browse buyer requests and respond with what you have.\n\n` +
-      `Browse requests: ${link}\n— CarsFindMe`,
+      `Browse requests: ${link}\n\n` +
+      `Tip: buyers can tap your name to see your public profile. Add a cover photo, a short bio, your specialties and a few showroom photos so they know who they're dealing with: ${appUrl}/#/dealer-profile\n— CarsFindMe`,
     html: wrap(`
       <p>Hi ${esc(dealer.name.split(/\s+/)[0])},</p>
       <p>Your dealer account${dealer.business_name ? ` for <strong>${esc(dealer.business_name)}</strong>` : ''} has been approved.
         You can now browse buyer requests and respond with what you have.</p>
       <p>${button(link, 'Browse requests')}</p>
+      <p><strong>Tip:</strong> buyers can tap your name to see your public profile. Add a cover photo, a short bio, your specialties and a few showroom photos so they know who they're dealing with. <a href="${esc(`${appUrl}/#/dealer-profile`)}">Set up your profile</a></p>
       <p style="color:#5f6b7a;font-size:13px">— CarsFindMe</p>`),
   };
 }

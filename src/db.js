@@ -32,6 +32,16 @@ const SCHEMA = `
     alert_token      TEXT, -- secret for one-click unsubscribe links
     avatar           TEXT, -- profile picture filename in the uploads folder
     google_sub       TEXT, -- Google account ID for buyers who use "Continue with Google"
+    -- Dealers' public profile (carsfindme.com/d/<profile_slug>).
+    profile_slug     TEXT,
+    bio              TEXT,
+    specialties      TEXT, -- JSON array, e.g. ["Porsche", "Air-cooled 911s"]
+    city             TEXT,
+    founded_year     INTEGER,
+    instagram        TEXT, -- handle without the @
+    cover            TEXT, -- cover photo filename in the uploads folder
+    profile_hidden_at     TEXT, -- set by an admin to take the profile offline
+    profile_hidden_reason TEXT,
     -- Dealer application details, collected at signup and checked by an admin before approval.
     dealer_type      TEXT, -- 'dealer' (licensed dealer) or 'broker' (broker / independent specialist)
     job_title        TEXT,
@@ -135,6 +145,17 @@ const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_dealer_reports_dealer ON dealer_reports(dealer_id, status);
 
+  -- Showroom / past-sales photos on a dealer's public profile.
+  CREATE TABLE IF NOT EXISTS dealer_photos (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    dealer_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    filename   TEXT NOT NULL UNIQUE,
+    caption    TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_dealer_photos_dealer ON dealer_photos(dealer_id);
+
   -- Messages sent through the Contact us page (also emailed to admins).
   CREATE TABLE IF NOT EXISTS contact_messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,10 +201,13 @@ function migrate(db) {
       CHECK (status IN ('active', 'pending', 'rejected'))`);
   }
   for (const column of ['frozen_at', 'frozen_reason', 'last_login_at', 'terms_accepted_at', 'alert_mode', 'alert_makes', 'alert_token', 'avatar',
-    'dealer_type', 'job_title', 'business_address', 'website', 'license_number', 'license_state', 'experience', 'verification_checks', 'google_sub']) {
+    'dealer_type', 'job_title', 'business_address', 'website', 'license_number', 'license_state', 'experience', 'verification_checks', 'google_sub',
+    'profile_slug', 'bio', 'specialties', 'city', 'instagram', 'cover', 'profile_hidden_at', 'profile_hidden_reason']) {
     if (!columns.includes(column)) db.exec(`ALTER TABLE accounts ADD COLUMN ${column} TEXT`);
   }
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_google_sub ON accounts(google_sub)');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_profile_slug ON accounts(profile_slug)');
+  if (!columns.includes('founded_year')) db.exec('ALTER TABLE accounts ADD COLUMN founded_year INTEGER');
   if (!columns.includes('alert_min_budget')) db.exec('ALTER TABLE accounts ADD COLUMN alert_min_budget INTEGER');
   if (!columns.includes('email_verified_at')) {
     // Accounts created before email verification existed are treated as verified.

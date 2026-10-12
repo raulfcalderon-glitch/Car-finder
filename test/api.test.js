@@ -1258,3 +1258,82 @@ test('buyers can continue with Google; dealers cannot', async () => {
   await (await admin())('PATCH', `/api/admin/accounts/${created.body.account.id}`, { frozen: true });
   assert.equal((await google(client(), claims)).status, 403);
 });
+
+// A real 1x1 PNG, as the browser would send it.
+const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+test('approved dealers get a public profile with bio, specialties, cover and gallery', async () => {
+  const dealer = await signup('dealer', { businessName: 'Stuttgart Classics', approve: false });
+  const anon = client();
+  const { profile: mine } = (await dealer('GET', '/api/me/profile')).body;
+  assert.equal(mine.slug, 'stuttgart-classics');
+  assert.equal(mine.public, false, 'not public before approval');
+  assert.equal((await anon('GET', '/api/dealers/stuttgart-classics')).status, 404);
+  assert.equal((await dealer('GET', '/api/dealers/stuttgart-classics')).body.viewer, 'owner', 'the dealer can preview it');
+
+  const saved = await dealer('PUT', '/api/me/profile', {
+    bio: 'Air-cooled specialists since 1998.', specialties: ['porsche', 'Air-cooled 911s', 'Porsche', 'bmw'],
+    city: 'Miami, FL', foundedYear: 1998, instagram: 'https://www.instagram.com/stuttgartclassics/',
+  });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.deepEqual(saved.body.profile.specialties, ['Porsche', 'Air-cooled 911s', 'BMW']);
+  assert.equal(saved.body.profile.instagram, 'stuttgartclassics');
+  assert.equal((await dealer('PUT', '/api/me/profile', { instagram: 'not a handle!' })).status, 400);
+  assert.equal((await dealer('PUT', '/api/me/profile', { foundedYear: 1700 })).status, 400);
+  assert.equal((await dealer('PUT', '/api/me/profile', { specialties: Array.from({ length: 9 }, (_, i) => `S${i}`) })).status, 400);
+  assert.equal((await (await signup('user'))('PUT', '/api/me/profile', { bio: 'x' })).status, 403);
+
+  assert.equal((await dealer('PUT', '/api/me/cover', { photo: PNG })).status, 200);
+  for (let i = 0; i < 8; i++) assert.equal((await dealer('POST', '/api/me/gallery', { photo: PNG, caption: `Car ${i}` })).status, 201);
+  assert.equal((await dealer('POST', '/api/me/gallery', { photo: PNG })).status, 400, 'max 8 photos');
+  assert.equal((await dealer('POST', '/api/me/gallery', { photo: 'data:image/png;base64,AAAA' })).status, 400);
+
+  // Approve: now anyone can see it, with what was checked but none of the private details.
+  await completeChecks(dealer.account.id);
+  await (await admin())('PATCH', `/api/admin/accounts/${dealer.account.id}`, { status: 'active' });
+  const pub = await anon('GET', '/api/dealers/stuttgart-classics');
+  assert.equal(pub.status, 200, JSON.stringify(pub.body));
+  const p = pub.body.profile;
+  assert.equal(p.businessName, 'Stuttgart Classics');
+  assert.equal(p.verified, true);
+  assert.deepEqual(p.checked, ['Dealer license checked with Florida', 'Website and business listing checked', 'Business phone called to confirm']);
+  assert.equal(p.gallery.length, 8);
+  assert.ok(p.coverUrl);
+  for (const secret of ['email', 'phone', 'licenseNumber', 'hidden', 'accountId']) assert.equal(p[secret], undefined, secret);
+  assert.ok(!JSON.stringify(pub.body).includes(dealer.account.email));
+
+  // Dealers can only remove their own photos; admins can remove any.
+  const other = await signup('dealer');
+  assert.equal((await other('DELETE', `/api/me/gallery/${p.gallery[0].id}`)).status, 404);
+  assert.equal((await dealer('DELETE', `/api/me/gallery/${p.gallery[0].id}`)).status, 200);
+  assert.equal((await anon('DELETE', `/api/admin/gallery/${p.gallery[1].id}`)).status, 401);
+  assert.equal((await (await admin())('DELETE', `/api/admin/gallery/${p.gallery[1].id}`)).status, 200);
+
+  // Admins can hide a profile; the public then gets a 404, admins still see it.
+  await (await admin())('PATCH', `/api/admin/accounts/${dealer.account.id}`, { profileHidden: true, reason: 'stolen photos' });
+  assert.equal((await anon('GET', '/api/dealers/stuttgart-classics')).status, 404);
+  const asAdmin = (await (await admin())('GET', '/api/dealers/stuttgart-classics')).body;
+  assert.equal(asAdmin.viewer, 'admin');
+  assert.equal(asAdmin.profile.hiddenReason, 'stolen photos');
+  await (await admin())('PATCH', `/api/admin/accounts/${dealer.account.id}`, { profileHidden: false });
+
+  // Same business name gets a different address.
+  const twin = await signup('dealer', { businessName: 'Stuttgart Classics' });
+  assert.equal((await twin('GET', '/api/me/profile')).body.profile.slug, 'stuttgart-classics-2');
+
+  // Responses link to the profile.
+  const buyer = await signup('user');
+  const { request } = (await buyer('POST', '/api/requests', { make: 'Porsche', model: 'Profile 964' })).body;
+  await dealer('POST', `/api/requests/${request.id}/responses`, { message: 'Have one' });
+  const seen = (await buyer('GET', `/api/requests/${request.id}`)).body.responses[0];
+  assert.equal(seen.dealer.profileSlug, 'stuttgart-classics');
+  assert.equal((await anon('GET', '/api/dealers/stuttgart-classics')).body.profile.responseCount, 1);
+
+  // The shareable /d/ link carries the dealer's own link-preview tags.
+  const html = await (await fetch(`${base}/d/stuttgart-classics`)).text();
+  assert.match(html, /<title>Stuttgart Classics on CarsFindMe — Verified dealer<\/title>/);
+  assert.match(html, /og:description" content="Air-cooled specialists since 1998\."/);
+  assert.match(html, /og:image" content="https:\/\/cars\.test\/uploads\/[a-f0-9]{32}\.png"/);
+  const unknown = await (await fetch(`${base}/d/nobody-here`)).text();
+  assert.match(unknown, /og:title" content="CarsFindMe — Tell us the car/);
+});

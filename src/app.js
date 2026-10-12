@@ -202,6 +202,9 @@ function serializeAdminAccount(a, isAdmin) {
             requiredChecks: requiredChecks(a),
             missingChecks: missingChecks(a),
             verified: isVerifiedDealer(a),
+            profileSlug: a.profile_slug,
+            profileHidden: Boolean(a.profile_hidden_at),
+            profileHiddenReason: a.profile_hidden_reason,
             openReports: a.open_report_count ?? undefined,
             totalReports: a.report_count ?? undefined,
           }
@@ -272,6 +275,7 @@ function serializeResponse(r, photos = []) {
       email: r.dealer_email,
       phone: r.dealer_phone,
       avatarUrl: photoUrl(r.dealer_avatar),
+      profileSlug: r.dealer_slug,
       type: r.dealer_type ?? 'dealer',
       verified: isVerifiedDealer({
         role: 'dealer',
@@ -282,6 +286,58 @@ function serializeResponse(r, photos = []) {
       }),
     },
   };
+}
+
+// ---------- dealer profiles ----------
+
+const esc = (v) =>
+  String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+const MAX_GALLERY = 8;
+const MAX_SPECIALTIES = 8;
+
+// "Stuttgart Classics, LLC" → "stuttgart-classics-llc"
+function slugify(text) {
+  return String(text ?? '')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    .slice(0, 40).replace(/-+$/, '') || 'dealer';
+}
+
+// Accepts "@handle", "instagram.com/handle" or a full URL; stores just the handle.
+function parseInstagram(value) {
+  const raw = str(value, 'Instagram', { max: 200 });
+  if (!raw) return null;
+  const handle = raw.replace(/^https?:\/\//i, '').replace(/^(www\.)?instagram\.com\//i, '').replace(/^@/, '').split(/[/?#]/)[0];
+  if (!/^[A-Za-z0-9._]{1,30}$/.test(handle)) throw new HttpError(400, 'Enter an Instagram handle like @yourdealership');
+  return handle;
+}
+
+function parseSpecialties(value) {
+  const list = Array.isArray(value) ? value : String(value ?? '').split(',');
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    const s = standardMake(String(item).trim().replace(/\s+/g, ' '));
+    if (!s) continue;
+    if (s.length > 40) throw new HttpError(400, 'Each specialty must be at most 40 characters');
+    if (seen.has(s.toLowerCase())) continue;
+    seen.add(s.toLowerCase());
+    out.push(s);
+  }
+  if (out.length > MAX_SPECIALTIES) throw new HttpError(400, `Choose up to ${MAX_SPECIALTIES} specialties`);
+  return out;
+}
+
+// What CarsFindMe checked, in words a buyer understands. Never includes the admin's notes.
+function checkedLabels(dealer) {
+  const checks = parseChecks(dealer);
+  const broker = dealer.dealer_type === 'broker';
+  return [
+    checks.license && `Dealer license checked${dealer.license_state ? ` with ${dealer.license_state}` : ''}`,
+    checks.web && (broker ? 'Website or references checked' : 'Website and business listing checked'),
+    checks.call && 'Business phone called to confirm',
+  ].filter(Boolean);
 }
 
 // ---------- http helpers ----------
@@ -550,6 +606,22 @@ export function createApp(
         AND COALESCE(alert_mode, 'all') != 'off'`),
     setAlertToken: db.prepare('UPDATE accounts SET alert_token = ? WHERE id = ?'),
     setAvatar: db.prepare('UPDATE accounts SET avatar = ? WHERE id = ?'),
+    setCover: db.prepare('UPDATE accounts SET cover = ? WHERE id = ?'),
+    slugTaken: db.prepare('SELECT 1 FROM accounts WHERE profile_slug = ?'),
+    setSlug: db.prepare('UPDATE accounts SET profile_slug = ? WHERE id = ?'),
+    dealersWithoutSlug: db.prepare("SELECT * FROM accounts WHERE role = 'dealer' AND profile_slug IS NULL"),
+    dealerBySlug: db.prepare("SELECT * FROM accounts WHERE role = 'dealer' AND profile_slug = ?"),
+    setProfile: db.prepare(`
+      UPDATE accounts SET bio = :bio, specialties = :specialties, city = :city, founded_year = :founded_year, instagram = :instagram
+      WHERE id = :id`),
+    hideProfile: db.prepare("UPDATE accounts SET profile_hidden_at = datetime('now'), profile_hidden_reason = ? WHERE id = ?"),
+    unhideProfile: db.prepare('UPDATE accounts SET profile_hidden_at = NULL, profile_hidden_reason = NULL WHERE id = ?'),
+    galleryFor: db.prepare('SELECT * FROM dealer_photos WHERE dealer_id = ? ORDER BY id'),
+    galleryCount: db.prepare('SELECT COUNT(*) AS n FROM dealer_photos WHERE dealer_id = ?'),
+    insertGalleryPhoto: db.prepare('INSERT INTO dealer_photos (dealer_id, filename, caption) VALUES (?, ?, ?)'),
+    galleryPhotoById: db.prepare('SELECT * FROM dealer_photos WHERE id = ?'),
+    deleteGalleryPhoto: db.prepare('DELETE FROM dealer_photos WHERE id = ?'),
+    dealerResponseCount: db.prepare('SELECT COUNT(*) AS n FROM visible_responses WHERE dealer_id = ?'),
     setDealerApplication: db.prepare(`
       UPDATE accounts SET dealer_type = :dealer_type, job_title = :job_title, business_address = :business_address,
         website = :website, license_number = :license_number, license_state = :license_state, experience = :experience
@@ -585,7 +657,7 @@ export function createApp(
       WHERE x.dealer_id = ? ORDER BY x.created_at DESC, x.id DESC`),
     adminResponsesForRequest: db.prepare(`
       SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar, a.dealer_type, a.license_number AS dealer_license_number,
-        a.verification_checks AS dealer_checks, a.status AS dealer_status,
+        a.verification_checks AS dealer_checks, a.status AS dealer_status, a.profile_slug AS dealer_slug,
         a.frozen_at AS dealer_frozen_at
       FROM responses x JOIN accounts a ON a.id = x.dealer_id
       WHERE x.request_id = ? ORDER BY x.created_at ASC, x.id ASC`),
@@ -642,12 +714,12 @@ export function createApp(
       FROM requests r WHERE r.user_id = ? ORDER BY r.created_at DESC, r.id DESC`),
     responsesForRequest: db.prepare(`
       SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar, a.dealer_type, a.license_number AS dealer_license_number,
-        a.verification_checks AS dealer_checks, a.status AS dealer_status
+        a.verification_checks AS dealer_checks, a.status AS dealer_status, a.profile_slug AS dealer_slug
       FROM responses x JOIN accounts a ON a.id = x.dealer_id
       WHERE x.request_id = ? AND a.frozen_at IS NULL ORDER BY x.created_at ASC, x.id ASC`),
     responsesForRequestByDealer: db.prepare(`
       SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar, a.dealer_type, a.license_number AS dealer_license_number,
-        a.verification_checks AS dealer_checks, a.status AS dealer_status
+        a.verification_checks AS dealer_checks, a.status AS dealer_status, a.profile_slug AS dealer_slug
       FROM responses x JOIN accounts a ON a.id = x.dealer_id
       WHERE x.request_id = ? AND x.dealer_id = ? ORDER BY x.created_at ASC, x.id ASC`),
     insertResponse: db.prepare('INSERT INTO responses (request_id, dealer_id, message, price) VALUES (?, ?, ?, ?)'),
@@ -657,7 +729,7 @@ export function createApp(
       SELECT p.filename FROM response_photos p JOIN responses x ON x.id = p.response_id WHERE x.request_id = ?`),
     responseById: db.prepare(`
       SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar, a.dealer_type, a.license_number AS dealer_license_number,
-        a.verification_checks AS dealer_checks, a.status AS dealer_status
+        a.verification_checks AS dealer_checks, a.status AS dealer_status, a.profile_slug AS dealer_slug
       FROM responses x JOIN accounts a ON a.id = x.dealer_id WHERE x.id = ?`),
     // Homepage ticker: vehicle basics only — never who posted it, where, or their budget.
     recentPublicRequests: db.prepare(`
@@ -667,6 +739,8 @@ export function createApp(
       "SELECT DISTINCT make FROM visible_requests WHERE status = 'open' ORDER BY make COLLATE NOCASE",
     ),
   };
+
+  for (const dealer of q.dealersWithoutSlug.all()) ensureSlug(dealer);
 
   function currentAccount(req) {
     const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
@@ -740,6 +814,97 @@ export function createApp(
       names.push(name);
     }
     return names;
+  }
+
+  async function storeImage({ bytes, ext }) {
+    await mkdir(uploadsDir, { recursive: true });
+    const name = `${randomBytes(16).toString('hex')}.${ext}`;
+    await writeFile(join(uploadsDir, name), bytes);
+    return name;
+  }
+
+  // Every dealer gets a stable profile address from their business name.
+  function ensureSlug(dealer) {
+    if (dealer.profile_slug) return dealer.profile_slug;
+    const base = slugify(dealer.business_name || dealer.name);
+    let slug = base;
+    for (let n = 2; q.slugTaken.get(slug); n++) slug = `${base}-${n}`;
+    q.setSlug.run(slug, dealer.id);
+    dealer.profile_slug = slug;
+    return slug;
+  }
+
+  // Only approved, active dealers have a public profile (admins can still see hidden ones).
+  const profileIsPublic = (d) => d.status === 'active' && !d.frozen_at && !d.profile_hidden_at;
+
+  function dealerProfile(d, { forAdmin = false, forOwner = false } = {}) {
+    return {
+      slug: d.profile_slug,
+      url: `${appUrl}/d/${d.profile_slug}`,
+      businessName: d.business_name || d.name,
+      type: d.dealer_type ?? 'dealer',
+      avatarUrl: photoUrl(d.avatar),
+      coverUrl: photoUrl(d.cover),
+      bio: d.bio,
+      specialties: d.specialties ? JSON.parse(d.specialties) : [],
+      city: d.city,
+      foundedYear: d.founded_year,
+      website: d.website,
+      instagram: d.instagram,
+      verified: isVerifiedDealer(d),
+      checked: checkedLabels(d),
+      memberSince: d.created_at,
+      responseCount: q.dealerResponseCount.get(d.id).n,
+      gallery: q.galleryFor.all(d.id).map((p) => ({ id: p.id, url: photoUrl(p.filename), caption: p.caption })),
+      public: profileIsPublic(d),
+      ...(forAdmin || forOwner
+        ? { hidden: Boolean(d.profile_hidden_at), hiddenReason: forAdmin ? d.profile_hidden_reason : undefined, status: d.status, frozen: Boolean(d.frozen_at) }
+        : {}),
+      ...(forAdmin ? { accountId: d.id } : {}),
+    };
+  }
+
+  // Dealers waiting for approval can already prepare their profile; it goes public once approved.
+  function requireDealerAccount(req) {
+    const account = currentAccount(req);
+    if (!account) throw new HttpError(401, 'Please log in');
+    if (account.role !== 'dealer') throw new HttpError(403, 'Only dealers have public profiles');
+    if (account.status === 'rejected') requireApproved(account);
+    ensureSlug(account);
+    return account;
+  }
+
+  // carsfindme.com/d/<slug>: the normal app page, but with link-preview tags for this dealer, so
+  // sharing the link on Instagram or in a text shows their name, bio and cover photo.
+  async function serveDealerShare(res, slug) {
+    let html = await readFile(join(PUBLIC_DIR, 'index.html'), 'utf8');
+    const dealer = q.dealerBySlug.get(slug);
+    if (dealer && profileIsPublic(dealer)) {
+      const name = dealer.business_name || dealer.name;
+      const title = `${name} on CarsFindMe${isVerifiedDealer(dealer) ? ' — Verified dealer' : ''}`;
+      const specialties = dealer.specialties ? JSON.parse(dealer.specialties) : [];
+      const about = (dealer.bio || `${specialties.length ? `Specialists in ${specialties.join(', ')}. ` : ''}Post the car you want on CarsFindMe and ${name} can find it for you.`)
+        .replace(/\s+/g, ' ').slice(0, 200);
+      const image = dealer.cover ? `${appUrl}/uploads/${dealer.cover}` : null;
+      const meta = (attr, key, value) => {
+        html = html.replace(new RegExp(`(<meta ${attr}="${key}" content=")[^"]*(")`), `$1${esc(value)}$2`);
+      };
+      html = html.replace(/<title>[^<]*<\/title>/, `<title>${esc(title)}</title>`);
+      meta('name', 'description', about);
+      meta('property', 'og:title', title);
+      meta('property', 'og:description', about);
+      meta('property', 'og:url', `${appUrl}/d/${slug}`);
+      meta('name', 'twitter:title', title);
+      meta('name', 'twitter:description', about);
+      if (image) {
+        meta('property', 'og:image', image);
+        meta('name', 'twitter:image', image);
+        html = html.replace(/\s*<meta property="og:image:(width|height)"[^>]*>/g, '');
+        meta('property', 'og:image:alt', `${name} cover photo`);
+      }
+    }
+    res.writeHead(200, { 'Content-Type': MIME['.html'] });
+    res.end(html);
   }
 
   async function removePhotoFiles(filenames) {
@@ -1044,6 +1209,7 @@ export function createApp(
       const status = role === 'dealer' && !admins.has(email) ? 'pending' : 'active';
       const { lastInsertRowid } = q.insertAccount.run(email, hashPassword(password), name, role, businessName, phone, status);
       if (application) q.setDealerApplication.run({ ...application, id: lastInsertRowid });
+      if (role === 'dealer') ensureSlug(q.accountById.get(lastInsertRowid));
       const account = q.accountById.get(lastInsertRowid);
       startSession(res, account.id, 201, { account: publicAccount(account) });
       sendVerification(account);
@@ -1349,6 +1515,74 @@ export function createApp(
       }
     }],
 
+    // --- dealer profiles ---
+
+    // Public: anyone can view an approved dealer's profile. Admins also see hidden ones.
+    ['GET', /^\/api\/dealers\/([a-z0-9-]+)$/, async (req, res, [slug]) => {
+      const dealer = q.dealerBySlug.get(slug);
+      const viewer = currentAccount(req);
+      const asAdmin = Boolean(viewer && isAdmin(viewer));
+      const asOwner = Boolean(viewer && dealer && viewer.id === dealer.id);
+      if (!dealer || (!profileIsPublic(dealer) && !asAdmin && !asOwner)) throw new HttpError(404, 'This dealer profile is not available');
+      sendJson(res, 200, { profile: dealerProfile(dealer, { forAdmin: asAdmin, forOwner: asOwner }), viewer: asAdmin ? 'admin' : asOwner ? 'owner' : 'public' });
+    }],
+
+    ['GET', /^\/api\/me\/profile$/, async (req, res) => {
+      const account = requireDealerAccount(req);
+      sendJson(res, 200, { profile: dealerProfile(account, { forOwner: true }) });
+    }],
+
+    ['PUT', /^\/api\/me\/profile$/, async (req, res) => {
+      const account = requireDealerAccount(req);
+      const body = await readJson(req);
+      const year = int(body.foundedYear, 'Year founded', { min: 1900, max: new Date().getFullYear() });
+      q.setProfile.run({
+        id: account.id,
+        bio: str(body.bio, 'About', { max: 1500 }),
+        specialties: JSON.stringify(parseSpecialties(body.specialties)),
+        city: str(body.city, 'City', { max: 80 }),
+        founded_year: year,
+        instagram: parseInstagram(body.instagram),
+      });
+      sendJson(res, 200, { profile: dealerProfile(q.accountById.get(account.id), { forOwner: true }) });
+    }],
+
+    ['PUT', /^\/api\/me\/cover$/, async (req, res) => {
+      const account = requireDealerAccount(req);
+      if (!uploadsDir) throw new HttpError(400, 'Photo uploads are not available');
+      const [photo] = decodePhotos([(await readJson(req, 8 * 1024 * 1024)).photo]);
+      q.setCover.run(await storeImage(photo), account.id);
+      if (account.cover) await removePhotoFiles([account.cover]);
+      sendJson(res, 200, { profile: dealerProfile(q.accountById.get(account.id), { forOwner: true }) });
+    }],
+
+    ['DELETE', /^\/api\/me\/cover$/, async (req, res) => {
+      const account = requireDealerAccount(req);
+      q.setCover.run(null, account.id);
+      if (account.cover) await removePhotoFiles([account.cover]);
+      sendJson(res, 200, { profile: dealerProfile(q.accountById.get(account.id), { forOwner: true }) });
+    }],
+
+    ['POST', /^\/api\/me\/gallery$/, async (req, res) => {
+      const account = requireDealerAccount(req);
+      if (!uploadsDir) throw new HttpError(400, 'Photo uploads are not available');
+      if (q.galleryCount.get(account.id).n >= MAX_GALLERY) throw new HttpError(400, `You can have up to ${MAX_GALLERY} photos. Remove one first.`);
+      const body = await readJson(req, 8 * 1024 * 1024);
+      const [photo] = decodePhotos([body.photo]);
+      q.insertGalleryPhoto.run(account.id, await storeImage(photo), str(body.caption, 'Caption', { max: 120 }));
+      sendJson(res, 201, { profile: dealerProfile(q.accountById.get(account.id), { forOwner: true }) });
+    }],
+
+    // The dealer removes their own photo; admins can remove any.
+    ['DELETE', /^\/api\/(me|admin)\/gallery\/(\d+)$/, async (req, res, [scope, id]) => {
+      const account = scope === 'admin' ? requireAdmin(req) : requireDealerAccount(req);
+      const photo = q.galleryPhotoById.get(Number(id));
+      if (!photo || (scope === 'me' && photo.dealer_id !== account.id)) throw new HttpError(404, 'Photo not found');
+      q.deleteGalleryPhoto.run(photo.id);
+      await removePhotoFiles([photo.filename]);
+      sendJson(res, 200, { ok: true });
+    }],
+
     // --- dealers ---
 
     ['GET', /^\/api\/requests$/, async (req, res, _m, url) => {
@@ -1557,6 +1791,15 @@ export function createApp(
         q.unfreezeAccount.run(target.id);
       }
       if (body.verified === true) q.markVerified.run(target.id);
+      if (body.profileHidden !== undefined || body.removeCover) {
+        if (target.role !== 'dealer') throw new HttpError(400, 'Only dealers have public profiles');
+        if (body.profileHidden === true) q.hideProfile.run(str(body.reason, 'Reason', { max: 500 }), target.id);
+        else if (body.profileHidden === false) q.unhideProfile.run(target.id);
+        if (body.removeCover && target.cover) {
+          q.setCover.run(null, target.id);
+          await removePhotoFiles([target.cover]);
+        }
+      }
 
       sendJson(res, 200, { account: adminAccountPayload(target.id) });
       if (body.status === 'active' && target.status !== 'active') notify(dealerApprovedEmail({ dealer: target, appUrl }));
@@ -1639,6 +1882,8 @@ export function createApp(
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'Method not allowed');
       if (url.pathname.startsWith('/uploads/')) return await servePhoto(res, url.pathname.slice('/uploads/'.length));
+      const share = url.pathname.match(/^\/d\/([a-z0-9-]+)\/?$/);
+      if (share) return await serveDealerShare(res, share[1]);
       await serveStatic(res, url.pathname);
     } catch (err) {
       if (!(err instanceof HttpError)) console.error(err);

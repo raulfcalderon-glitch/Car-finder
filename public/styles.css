@@ -432,3 +432,51 @@ label:has(> .suggestions), .make-field label { position: relative; }
 .google-note { text-align: center; margin: 8px 0 0; font-size: .85rem; color: var(--muted); }
 .or-divider { display: flex; align-items: center; gap: 12px; margin: 16px 0 8px; color: var(--muted); font-size: .85rem; }
 .or-divider::before, .or-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+/* dealer public profiles */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.dealer-link { color: inherit; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+.dealer-link:hover { color: var(--accent); text-decoration-color: currentColor; }
+.owner-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px; font-size: .92rem; }
+.dealer-cover {
+  height: 240px; border-radius: var(--radius) var(--radius) 0 0; background-color: var(--ink);
+  background-image: radial-gradient(circle at 85% 20%, rgba(226, 40, 63, .35), transparent 55%), linear-gradient(135deg, var(--ink), var(--ink-2));
+  background-size: cover; background-position: center;
+}
+.dealer-cover.small { height: 140px; border-radius: 8px; margin-bottom: 8px; }
+.dealer-head { border-top-left-radius: 0; border-top-right-radius: 0; margin-top: 0; padding-top: 0; }
+.dealer-identity { display: flex; align-items: flex-end; gap: 16px; padding-top: 12px; flex-wrap: wrap; }
+.dealer-identity .avatar { box-shadow: 0 0 0 4px var(--surface); flex-shrink: 0; margin-top: -60px; }
+.button.small { padding: 4px 10px; font-size: .85rem; }
+.make-field { position: relative; }
+.dealer-identity h1 { margin: 0 0 4px; font-size: clamp(1.6rem, 4vw, 2.2rem); }
+.dealer-type { color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dealer-facts { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: .92rem; margin: 14px 0 10px; }
+.specialty-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.specialty { display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); font-size: .85rem; font-weight: 600; }
+.specialty button { background: none; border: 0; padding: 0 0 0 2px; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
+.specialty button:hover { color: var(--accent); }
+.dealer-links { margin-top: 12px; }
+.dealer-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; margin-top: 16px; align-items: start; }
+.dealer-body section { margin-bottom: 16px; }
+.dealer-body h2 { font-size: 1.15rem; }
+.bio { white-space: pre-wrap; margin: 0; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.gallery figure { margin: 0; position: relative; }
+.gallery img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px; display: block; background: var(--bg); }
+.gallery figcaption { font-size: .85rem; color: var(--muted); margin-top: 4px; }
+.gallery .danger.small { margin-top: 4px; }
+.photo-remove { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; padding: 0; border-radius: 50%; background: rgba(0, 0, 0, .65); color: #fff; border: 0; font-size: 1.1rem; line-height: 1; }
+.gallery-add { margin-top: 12px; }
+.gallery-add input { flex: 1; min-width: 180px; }
+.trust ul { list-style: none; padding: 0; margin: 0 0 10px; }
+.trust li { padding: 4px 0; color: var(--ok); font-weight: 600; }
+.cta-card .button { width: 100%; text-align: center; }
+.profile-editor { max-width: 760px; margin: 0 auto; }
+.profile-editor section { margin-bottom: 16px; }
+.field-block { margin-bottom: 14px; }
+.field-label { display: block; font-weight: 600; margin-bottom: 4px; }
+@media (max-width: 760px) {
+  .dealer-body { grid-template-columns: 1fr; }
+  .dealer-cover { height: 160px; }
+}

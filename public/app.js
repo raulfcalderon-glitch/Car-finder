@@ -162,6 +162,7 @@ function renderNav() {
         </div>
         <div class="menu-links menu-mobile">${links}</div>
         <a href="#/profile" role="menuitem">Profile &amp; photo</a>
+        ${me.role === 'dealer' ? '<a href="#/dealer-profile" role="menuitem">Public dealer profile</a>' : ''}
         <a href="#/" role="menuitem">Home</a>
         <a href="#/contact" role="menuitem">Contact us</a>
         <button type="button" id="logout" role="menuitem">Log out</button>
@@ -477,7 +478,7 @@ function typePlaceholder(input) {
   tick();
 }
 
-function contactPage() {
+function contactPage(params = new URLSearchParams()) {
   view.innerHTML = `
     <div class="contact-layout">
       <div class="card">
@@ -491,10 +492,10 @@ function contactPage() {
           <label>Topic
             <select name="topic" required>
               <option value="">Choose a topic…</option>
-              ${Object.entries(CONTACT_TOPICS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+              ${Object.entries(CONTACT_TOPICS).map(([v, l]) => `<option value="${v}"${params.get('topic') === v ? ' selected' : ''}>${l}</option>`).join('')}
             </select>
           </label>
-          <label>Message <textarea name="message" rows="6" required minlength="10"></textarea></label>
+          <label>Message <textarea name="message" rows="6" required minlength="10">${esc(params.get('message') ?? '')}</textarea></label>
           <label class="hp" aria-hidden="true">Leave this empty <input name="website" tabindex="-1" autocomplete="off"></label>
           <p class="error"></p>
           <button type="submit">Send message</button>
@@ -821,6 +822,16 @@ function alertSettingsPage() {
   };
   form.addEventListener('change', sync);
   sync();
+  // Offer the makes from their public profile's specialties.
+  api('/api/me/profile').then(({ profile }) => {
+    const known = [...new Set(profile.specialties.map((s) => normalizeMake(s)).filter(Boolean))];
+    if (!known.length) return;
+    const field = form.querySelector('.makes-field');
+    field.insertAdjacentHTML('beforeend', `<button type="button" class="link-button" id="use-specialties">Use my profile specialties (${esc(known.join(', '))})</button>`);
+    field.querySelector('#use-specialties').addEventListener('click', () => {
+      form.makes.value = known.join(', ');
+    });
+  }).catch(() => {});
   bindForm(form, async (data) => {
     me = (await api('/api/me/alerts', { method: 'PUT', body: data })).account;
     view.querySelector('#saved').textContent = 'Saved ✓';
@@ -1443,7 +1454,11 @@ function responseCard(x, { isOwner, isAdminView, isDealerView, requestOpen }) {
   return `
     <div class="card response${x.withdrawn || passed ? ' dimmed' : ''}${isOwner && x.feedback === 'interested' ? ' interested' : ''}" data-response="${x.id}">
       <div class="row spread">
-        <strong class="with-avatar">${avatar({ ...x.dealer, role: 'dealer' }, 40)}<span>${esc(x.dealer.businessName || x.dealer.name)}</span>${x.dealer.verified ? verifiedBadge(x.dealer.type) : ''}${
+        <strong class="with-avatar">${avatar({ ...x.dealer, role: 'dealer' }, 40)}${
+          x.dealer.profileSlug
+            ? `<a class="dealer-link" href="#/dealer/${esc(x.dealer.profileSlug)}" title="See ${esc(x.dealer.businessName || x.dealer.name)}'s profile">${esc(x.dealer.businessName || x.dealer.name)}</a>`
+            : `<span>${esc(x.dealer.businessName || x.dealer.name)}</span>`
+        }${x.dealer.verified ? verifiedBadge(x.dealer.type) : ''}${
           isAdminView ? ` <a class="muted" href="#/admin/account/${x.dealer.id}">view dealer</a>` : ''
         }${x.dealerFrozen ? ' <span class="pill closed">frozen — hidden from buyer</span>' : ''}</strong>
         <span class="muted">${ago(x.createdAt)}${edited}</span>
@@ -1595,6 +1610,281 @@ async function myResponses() {
             .join('')}</div>`
         : '<div class="card empty">You haven\'t responded to any requests yet. <a href="#/browse">Browse requests</a>.</div>'
     }`;
+}
+
+// ---------- dealer profiles ----------
+
+const MAX_GALLERY = 8;
+const instagramUrl = (handle) => `https://instagram.com/${encodeURIComponent(handle)}`;
+const websiteUrl = (site) => (/^https?:\/\//i.test(site) ? site : `https://${site}`);
+const yearOf = (sqlDate) => sqlDate.slice(0, 4);
+
+function profileHtml(p, { viewer }) {
+  const facts = [
+    p.city && `<span>📍 ${esc(p.city)}</span>`,
+    p.foundedYear && `<span>In business since ${p.foundedYear}</span>`,
+    `<span>On CarsFindMe since ${yearOf(p.memberSince)}</span>`,
+    p.responseCount ? `<span>${p.responseCount} buyer ${p.responseCount === 1 ? 'request' : 'requests'} answered</span>` : '',
+  ].filter(Boolean);
+  const isAdminView = viewer === 'admin';
+  return `
+    <article class="dealer-profile">
+      <div class="dealer-cover"${p.coverUrl ? ` style="background-image:url('${esc(p.coverUrl)}')"` : ''}></div>
+      <div class="card dealer-head">
+        <div class="dealer-identity">
+          ${avatar({ role: 'dealer', businessName: p.businessName, avatarUrl: p.avatarUrl }, 96)}
+          <div>
+            <h1>${esc(p.businessName)}</h1>
+            <div class="dealer-type">${p.type === 'broker' ? 'Broker / independent specialist' : 'Specialty dealer'} ${p.verified ? verifiedBadge(p.type) : ''}</div>
+          </div>
+        </div>
+        <div class="dealer-facts">${facts.join('')}</div>
+        ${p.specialties.length ? `<div class="specialty-chips">${p.specialties.map((s) => `<span class="specialty">${esc(s)}</span>`).join('')}</div>` : ''}
+        <div class="row dealer-links">
+          ${p.website ? `<a class="button secondary small" href="${esc(websiteUrl(p.website))}" target="_blank" rel="noopener nofollow">Website ↗</a>` : ''}
+          ${p.instagram ? `<a class="button secondary small" href="${esc(instagramUrl(p.instagram))}" target="_blank" rel="noopener nofollow">Instagram @${esc(p.instagram)} ↗</a>` : ''}
+          <button type="button" class="secondary small" id="share-profile">Share</button>
+        </div>
+      </div>
+      <div class="dealer-body">
+        <div>
+          ${p.bio ? `<section class="card"><h2>About</h2><p class="bio">${esc(p.bio)}</p></section>` : ''}
+          ${
+            p.gallery.length
+              ? `<section class="card"><h2>Gallery</h2><div class="gallery">${p.gallery
+                  .map(
+                    (g) => `<figure>
+                      <a href="${esc(g.url)}" target="_blank" rel="noopener"><img src="${esc(g.url)}" alt="${esc(g.caption || `Photo from ${p.businessName}`)}" loading="lazy"></a>
+                      ${g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}
+                      ${isAdminView ? `<button type="button" class="danger small" data-admin-remove-photo="${g.id}">Remove</button>` : ''}
+                    </figure>`,
+                  )
+                  .join('')}</div></section>`
+              : ''
+          }
+          ${!p.bio && !p.gallery.length ? `<section class="card empty">${esc(p.businessName)} hasn't added a description or photos yet.</section>` : ''}
+        </div>
+        <aside>
+          ${
+            p.checked.length
+              ? `<section class="card trust"><h2>What CarsFindMe checked</h2><ul>${p.checked.map((c) => `<li>✓ ${esc(c)}</li>`).join('')}</ul>
+                  <p class="hint">We verify dealers before they can see buyer requests. Still, always inspect a car and check its title before paying.</p></section>`
+              : ''
+          }
+          ${
+            !me || me.role === 'user'
+              ? `<section class="card cta-card"><h2>Looking for a car?</h2><p>Post the exact car you want. ${esc(p.businessName)} and other verified dealers will see it and come to you.</p>
+                  <a class="button" href="${me ? '#/new' : '#/signup?role=user'}">Post a request — it's free</a></section>`
+              : ''
+          }
+          <p class="report-row"><a class="link-button" href="#/contact?topic=problem&message=${encodeURIComponent(`I'd like to report the dealer profile ${p.url}: `)}">Report this profile</a></p>
+        </aside>
+      </div>
+    </article>`;
+}
+
+async function dealerProfilePage(slug) {
+  let data;
+  try {
+    data = await api(`/api/dealers/${encodeURIComponent(slug)}`);
+  } catch (err) {
+    view.innerHTML = `<div class="card empty narrow"><h1>Profile not available</h1><p>${esc(err.message)}</p><a class="button" href="#/">CarsFindMe home</a></div>`;
+    return;
+  }
+  const { profile: p, viewer } = data;
+  document.title = `${p.businessName} — CarsFindMe`;
+  const notes = [];
+  if (viewer === 'owner') {
+    notes.push(`<div class="owner-bar"><span>This is your public profile${p.public ? '' : ' — <strong>not visible to the public yet</strong> (' + (p.hidden ? 'hidden by CarsFindMe' : p.status === 'active' ? 'account frozen' : 'waiting for approval') + ')'}.</span><a class="button small" href="#/dealer-profile">Edit profile</a></div>`);
+  }
+  if (viewer === 'admin') {
+    notes.push(`<div class="owner-bar"><span>Admin view${p.hidden ? ` — <strong>hidden from the public</strong>${p.hiddenReason ? `: “${esc(p.hiddenReason)}”` : ''}` : p.public ? '' : ' — not public (dealer not approved or frozen)'}.</span>
+      <span class="row"><a class="button secondary small" href="#/admin/account/${p.accountId}">Dealer account</a>
+      ${p.coverUrl ? '<button class="secondary small" id="admin-remove-cover">Remove cover</button>' : ''}
+      ${p.hidden ? '<button class="small" id="admin-unhide">Show profile</button>' : '<button class="danger small" id="admin-hide">Hide profile</button>'}</span></div>`);
+  }
+  view.innerHTML = notes.join('') + profileHtml(p, { viewer });
+
+  view.querySelector('#share-profile').addEventListener('click', async (e) => {
+    const url = `${location.origin}/d/${p.slug}`;
+    try {
+      if (navigator.share) await navigator.share({ title: `${p.businessName} on CarsFindMe`, url });
+      else {
+        await navigator.clipboard.writeText(url);
+        e.target.textContent = 'Link copied ✓';
+      }
+    } catch {
+      /* closed the share sheet */
+    }
+  });
+  if (viewer === 'admin') {
+    const patch = async (body) => {
+      await api(`/api/admin/accounts/${p.accountId}`, { method: 'PATCH', body });
+      dealerProfilePage(slug);
+    };
+    view.querySelector('#admin-hide')?.addEventListener('click', () => {
+      const reason = prompt("Hide this dealer's public profile?\n\nTheir account and responses keep working.\n\nOptional reason (only admins see it):");
+      if (reason !== null) patch({ profileHidden: true, reason });
+    });
+    view.querySelector('#admin-unhide')?.addEventListener('click', () => patch({ profileHidden: false }));
+    view.querySelector('#admin-remove-cover')?.addEventListener('click', () => confirm('Remove the cover photo?') && patch({ removeCover: true }));
+    view.querySelectorAll('[data-admin-remove-photo]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        if (!confirm('Remove this photo from the profile?')) return;
+        await api(`/api/admin/gallery/${b.dataset.adminRemovePhoto}`, { method: 'DELETE' });
+        dealerProfilePage(slug);
+      }),
+    );
+  }
+}
+
+// Dealer: edit their public profile.
+async function editDealerProfile() {
+  const { profile: p } = await api('/api/me/profile');
+  let specialties = [...p.specialties];
+  view.innerHTML = `
+    <div class="profile-editor">
+      <div class="row spread" style="margin-bottom:12px">
+        <h1 style="margin:0">Your public profile</h1>
+        <a class="button secondary" href="#/dealer/${esc(p.slug)}">View profile</a>
+      </div>
+      <p class="muted">Buyers see this when they tap your name on a response, and anyone can open it at
+        <a href="/d/${esc(p.slug)}" target="_blank">${esc(location.host)}/d/${esc(p.slug)}</a>. Share it on Instagram and your website.
+        ${p.public ? '' : '<br><strong>It goes public once your dealer account is approved.</strong>'}</p>
+
+      <section class="card">
+        <h2>Cover photo</h2>
+        <div class="dealer-cover small"${p.coverUrl ? ` style="background-image:url('${esc(p.coverUrl)}')"` : ''}></div>
+        <p class="hint">A wide photo of your showroom or a car you're proud of. Your logo is your <a href="#/profile">profile photo</a>.</p>
+        <div class="row">
+          <label class="button secondary small" for="cover-input">${p.coverUrl ? 'Change cover' : 'Upload cover'}</label>
+          <input id="cover-input" type="file" accept="image/*" hidden>
+          ${p.coverUrl ? '<button type="button" class="secondary small" id="cover-remove">Remove</button>' : ''}
+        </div>
+        <p class="error" id="cover-error"></p>
+      </section>
+
+      <section class="card">
+        <h2>About your business</h2>
+        <form id="profile-form">
+          <label>About <span class="hint">what you specialize in, your history, what buyers can expect</span>
+            <textarea name="bio" rows="6" maxlength="1500" placeholder="Family-owned since 1998, we specialize in air-cooled Porsche 911s and rare BMW M cars. Every car gets a pre-purchase inspection…">${esc(p.bio ?? '')}</textarea>
+          </label>
+          <div class="field-block">
+            <span class="field-label">Specialties <span class="hint">up to 8 — makes, models or eras, e.g. Porsche, Air-cooled 911s, JDM</span></span>
+            <div class="specialty-chips editable" id="chips"></div>
+            <div class="make-field"><label class="sr-only" for="specialty-input">Add a specialty</label>
+              <input id="specialty-input" placeholder="Type and press Enter to add" autocomplete="off"></div>
+          </div>
+          <div class="grid-2">
+            <label>City and state <input name="city" maxlength="80" placeholder="Miami, FL" value="${esc(p.city ?? '')}"></label>
+            <label>In business since <span class="hint">year</span><input name="foundedYear" type="number" min="1900" max="${new Date().getFullYear()}" placeholder="1998" value="${esc(p.foundedYear ?? '')}"></label>
+          </div>
+          <label>Instagram <span class="hint">optional</span><input name="instagram" placeholder="@yourdealership" value="${p.instagram ? `@${esc(p.instagram)}` : ''}"></label>
+          <p class="hint">Website: ${p.website ? esc(p.website) : 'none'} — this is the one we verified. <a href="#/contact?topic=account">Contact us</a> to change it.</p>
+          <p class="error"></p>
+          <div class="row"><button type="submit">Save profile</button><span class="muted" id="saved"></span></div>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Gallery <span class="muted" style="font-weight:500;font-size:1rem">${p.gallery.length} of ${MAX_GALLERY}</span></h2>
+        <p class="hint">Your showroom, cars you've sold, events. Only post photos you own or have permission to use.</p>
+        <div class="gallery editable">${p.gallery
+          .map(
+            (g) => `<figure><img src="${esc(g.url)}" alt="">${g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}
+              <button type="button" class="photo-remove" data-remove-photo="${g.id}" aria-label="Remove photo">×</button></figure>`,
+          )
+          .join('')}</div>
+        ${
+          p.gallery.length < MAX_GALLERY
+            ? `<div class="row gallery-add">
+                <input id="caption-input" placeholder="Caption (optional)" maxlength="120">
+                <label class="button secondary small" for="gallery-input">Add photos</label>
+                <input id="gallery-input" type="file" accept="image/*" multiple hidden>
+              </div>`
+            : ''
+        }
+        <p class="error" id="gallery-error"></p>
+      </section>
+    </div>`;
+
+  // Specialties as removable chips, with make suggestions.
+  const chips = view.querySelector('#chips');
+  const input = view.querySelector('#specialty-input');
+  const drawChips = () => {
+    chips.innerHTML = specialties
+      .map((s, i) => `<span class="specialty">${esc(s)}<button type="button" data-chip="${i}" aria-label="Remove ${esc(s)}">×</button></span>`)
+      .join('');
+    input.disabled = specialties.length >= 8;
+    input.placeholder = input.disabled ? 'Maximum of 8 reached' : 'Type and press Enter to add';
+  };
+  const addChip = () => {
+    const value = input.value.trim();
+    if (value && specialties.length < 8 && !specialties.some((s) => s.toLowerCase() === value.toLowerCase())) {
+      specialties.push(normalizeMake(value) ?? value);
+    }
+    input.value = '';
+    drawChips();
+  };
+  chips.addEventListener('click', (e) => {
+    if (e.target.dataset.chip !== undefined) {
+      specialties.splice(Number(e.target.dataset.chip), 1);
+      drawChips();
+    }
+  });
+  attachSuggestions(input, (text) => (text.trim() ? matchMakes(text) : []), addChip);
+  input.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ',') && !e.defaultPrevented) {
+      e.preventDefault();
+      addChip();
+    }
+  });
+  drawChips();
+
+  bindForm(view.querySelector('#profile-form'), async (data) => {
+    if (input.value.trim()) addChip();
+    await api('/api/me/profile', { method: 'PUT', body: { ...data, specialties } });
+    view.querySelector('#saved').textContent = 'Saved ✓';
+  });
+
+  const cover = view.querySelector('#cover-input');
+  cover.addEventListener('change', async () => {
+    const file = cover.files[0];
+    if (!file) return;
+    try {
+      await api('/api/me/cover', { method: 'PUT', body: { photo: await shrinkPhoto(file, 1800) } });
+      editDealerProfile();
+    } catch (err) {
+      view.querySelector('#cover-error').textContent = err.message;
+    }
+  });
+  view.querySelector('#cover-remove')?.addEventListener('click', async () => {
+    await api('/api/me/cover', { method: 'DELETE' });
+    editDealerProfile();
+  });
+
+  const gallery = view.querySelector('#gallery-input');
+  gallery?.addEventListener('change', async () => {
+    const caption = view.querySelector('#caption-input').value;
+    const files = [...gallery.files].slice(0, MAX_GALLERY - p.gallery.length);
+    view.querySelector('#gallery-error').textContent = 'Uploading…';
+    try {
+      for (const file of files) {
+        await api('/api/me/gallery', { method: 'POST', body: { photo: await shrinkPhoto(file), caption: files.length === 1 ? caption : '' } });
+      }
+      editDealerProfile();
+    } catch (err) {
+      view.querySelector('#gallery-error').textContent = err.message;
+    }
+  });
+  view.querySelectorAll('[data-remove-photo]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      if (!confirm('Remove this photo?')) return;
+      await api(`/api/me/gallery/${b.dataset.removePhoto}`, { method: 'DELETE' });
+      editDealerProfile();
+    }),
+  );
 }
 
 // One-click "still looking" link from the reminder email.
@@ -1982,6 +2272,9 @@ async function adminAccount(id) {
     !a.isAdmin && !a.frozen && `<button class="danger" id="freeze">Freeze account</button>`,
     a.frozen && `<button data-patch='{"frozen":false}'>Unfreeze account</button>`,
     !a.emailVerified && `<button class="secondary" data-patch='{"verified":true}' data-confirm="Mark this email as confirmed without the user clicking the link?">Mark email confirmed</button>`,
+    isDealer && a.dealer.profileSlug && `<a class="button secondary" href="#/dealer/${esc(a.dealer.profileSlug)}">View public profile</a>`,
+    isDealer && !a.dealer.profileHidden && `<button class="secondary" data-patch='{"profileHidden":true}' data-confirm="Take this dealer's public profile offline? Their account and responses keep working.">Hide profile</button>`,
+    isDealer && a.dealer.profileHidden && `<button data-patch='{"profileHidden":false}'>Show profile again</button>`,
   ]
     .filter(Boolean)
     .join('');
@@ -2168,6 +2461,7 @@ const dealerBlocked = () => me.role === 'dealer' && me.status !== 'active';
 async function render() {
   const [path, search = ''] = location.hash.replace(/^#/, '').split('?');
   const params = new URLSearchParams(search);
+  document.title = 'CarsFindMe';
   renderNav();
   renderBanner();
 
@@ -2185,6 +2479,8 @@ async function render() {
     '/contact': contactPage,
   };
   if (path in openRoutes) return openRoutes[path](params);
+  const dealerPage = path.match(/^\/dealer\/([a-z0-9-]+)$/);
+  if (dealerPage) return dealerProfilePage(dealerPage[1]);
 
   // Pages for signed-out visitors only.
   const guestRoutes = { '/login': login, '/forgot': forgotPassword };
@@ -2198,6 +2494,7 @@ async function render() {
     if (me.isAdmin && path === '/admin') return await admin(params);
     if (me.role === 'dealer' && path === '/alerts') return alertSettingsPage();
     if (path === '/profile') return profilePage();
+    if (me.role === 'dealer' && path === '/dealer-profile') return await editDealerProfile();
     const adminDetail = path.match(/^\/admin\/account\/(\d+)$/);
     if (me.isAdmin && adminDetail) return await adminAccount(adminDetail[1]);
     if (me.isAdmin && path === '/admin/requests') return await adminRequests(params);
@@ -2222,5 +2519,8 @@ async function render() {
 }
 
 window.addEventListener('hashchange', render);
+// Shared profile links (carsfindme.com/d/<slug>) open the profile inside the app.
+const shared = location.pathname.match(/^\/d\/([a-z0-9-]+)\/?$/);
+if (shared) history.replaceState(null, '', `/#/dealer/${shared[1]}`);
 me = (await api('/api/me')).account;
 render();
