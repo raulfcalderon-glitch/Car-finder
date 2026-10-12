@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +16,17 @@ import { createLimiter } from './ratelimit.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 const MAX_BODY_BYTES = 64 * 1024;
+
+// Dealer photos arrive as base64 data URLs, already shrunk in the browser.
+const MAX_PHOTOS = 6;
+const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
+const MAX_PHOTO_BODY_BYTES = 40 * 1024 * 1024;
+const PHOTO_TYPES = [
+  { ext: 'jpg', mime: 'image/jpeg', test: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  { ext: 'png', mime: 'image/png', test: (b) => b.subarray(0, 4).toString('hex') === '89504e47' },
+  { ext: 'webp', mime: 'image/webp', test: (b) => b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP' },
+];
+const PHOTO_NAME = /^[a-f0-9]{32}\.(jpg|png|webp)$/;
 const SESSION_COOKIE = 'cf_session';
 
 const CONDITIONS = ['any', 'concours', 'excellent', 'good', 'project'];
@@ -143,9 +155,10 @@ function serializeRequest(r) {
   };
 }
 
-function serializeResponse(r) {
+function serializeResponse(r, photos = []) {
   return {
     id: r.id,
+    photos: photos.map((f) => `/uploads/${f}`),
     requestId: r.request_id,
     message: r.message,
     price: r.price,
@@ -167,12 +180,12 @@ function sendJson(res, status, data, headers = {}) {
   res.end(JSON.stringify(data));
 }
 
-async function readJson(req) {
+async function readJson(req, maxBytes = MAX_BODY_BYTES) {
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY_BYTES) throw new HttpError(413, 'Request body too large');
+    if (size > maxBytes) throw new HttpError(413, 'Request body too large');
     chunks.push(chunk);
   }
   if (!chunks.length) return {};
@@ -183,6 +196,22 @@ async function readJson(req) {
   } catch {
     throw new HttpError(400, 'Invalid JSON body');
   }
+}
+
+// Turns the browser's data URLs into checked image buffers; rejects anything that isn't a real image.
+function decodePhotos(list) {
+  if (list === undefined || list === null) return [];
+  if (!Array.isArray(list)) throw new HttpError(400, 'Photos must be a list');
+  if (list.length > MAX_PHOTOS) throw new HttpError(400, `You can attach up to ${MAX_PHOTOS} photos`);
+  return list.map((item, i) => {
+    const match = /^data:image\/[a-z+]+;base64,([A-Za-z0-9+/=]+)$/.exec(String(item));
+    if (!match) throw new HttpError(400, `Photo ${i + 1} isn't a valid image`);
+    const bytes = Buffer.from(match[1], 'base64');
+    if (bytes.length > MAX_PHOTO_BYTES) throw new HttpError(400, `Photo ${i + 1} is too large`);
+    const type = PHOTO_TYPES.find((t) => t.test(bytes));
+    if (!type) throw new HttpError(400, `Photo ${i + 1} must be a JPEG, PNG or WebP image`);
+    return { bytes, ext: type.ext };
+  });
 }
 
 function parseCookies(header = '') {
@@ -259,6 +288,7 @@ export function createApp(
     appUrl = 'http://localhost:3000',
     adminEmails = [],
     limits = {},
+    uploadsDir = null, // where dealer photos are stored; photos are disabled without it
   } = {},
 ) {
   const limiter = Object.fromEntries(
@@ -414,6 +444,10 @@ export function createApp(
       FROM responses x JOIN accounts a ON a.id = x.dealer_id
       WHERE x.request_id = ? AND x.dealer_id = ? ORDER BY x.created_at ASC, x.id ASC`),
     insertResponse: db.prepare('INSERT INTO responses (request_id, dealer_id, message, price) VALUES (?, ?, ?, ?)'),
+    insertPhoto: db.prepare('INSERT INTO response_photos (response_id, filename) VALUES (?, ?)'),
+    photosForResponse: db.prepare('SELECT filename FROM response_photos WHERE response_id = ? ORDER BY id'),
+    photosForRequest: db.prepare(`
+      SELECT p.filename FROM response_photos p JOIN responses x ON x.id = p.response_id WHERE x.request_id = ?`),
     responseById: db.prepare(`
       SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone
       FROM responses x JOIN accounts a ON a.id = x.dealer_id WHERE x.id = ?`),
@@ -479,6 +513,40 @@ export function createApp(
     q.insertSession.run(token, accountId);
     q.touchLogin.run(accountId);
     sendJson(res, status, payload, { 'Set-Cookie': sessionCookie(token, { secure: secureCookies }) });
+  }
+
+  const withPhotos = (r) => serializeResponse(r, q.photosForResponse.all(r.id).map((p) => p.filename));
+
+  async function savePhotos(responseId, photos) {
+    if (!photos.length) return [];
+    await mkdir(uploadsDir, { recursive: true });
+    const names = [];
+    for (const { bytes, ext } of photos) {
+      const name = `${randomBytes(16).toString('hex')}.${ext}`;
+      await writeFile(join(uploadsDir, name), bytes);
+      q.insertPhoto.run(responseId, name);
+      names.push(name);
+    }
+    return names;
+  }
+
+  async function removePhotoFiles(filenames) {
+    if (!uploadsDir) return;
+    await Promise.all(filenames.map((f) => unlink(join(uploadsDir, f)).catch(() => {})));
+  }
+
+  async function servePhoto(res, name) {
+    if (!uploadsDir || !PHOTO_NAME.test(name)) throw new HttpError(404, 'Not found');
+    let body;
+    try {
+      body = await readFile(join(uploadsDir, name));
+    } catch {
+      throw new HttpError(404, 'Not found');
+    }
+    const type = PHOTO_TYPES.find((t) => name.endsWith(`.${t.ext}`));
+    // Names are random and never reused, so browsers can cache them forever.
+    res.writeHead(200, { 'Content-Type': type.mime, 'Cache-Control': 'public, max-age=31536000, immutable' });
+    res.end(body);
   }
 
   function loadRequest(id) {
@@ -849,13 +917,25 @@ export function createApp(
       const request = loadRequest(Number(id));
       assertVisibleToDealers(request);
       if (request.status !== 'open') throw new HttpError(409, 'This request is no longer open');
-      const body = await readJson(req);
+      const body = await readJson(req, MAX_PHOTO_BODY_BYTES);
       const message = str(body.message, 'Message', { required: true, max: 2000 });
       const price = int(body.price, 'Price', { min: 0, max: 100_000_000 });
+      const photos = decodePhotos(body.photos);
+      if (photos.length && !uploadsDir) throw new HttpError(400, 'Photo uploads are not available');
       const { lastInsertRowid } = q.insertResponse.run(request.id, account.id, message, price);
       const response = q.responseById.get(lastInsertRowid);
-      sendJson(res, 201, { response: serializeResponse(response) });
-      notify(newResponseEmail({ request, response, dealer: account, buyer: q.accountById.get(request.user_id), appUrl }));
+      const names = await savePhotos(response.id, photos);
+      sendJson(res, 201, { response: serializeResponse(response, names) });
+      notify(
+        newResponseEmail({
+          request,
+          response,
+          dealer: account,
+          buyer: q.accountById.get(request.user_id),
+          appUrl,
+          photoUrls: names.map((n) => `${appUrl}/uploads/${n}`),
+        }),
+      );
     }],
 
     // --- admin ---
@@ -956,7 +1036,9 @@ export function createApp(
     ['DELETE', /^\/api\/admin\/requests\/(\d+)$/, async (req, res, [id]) => {
       requireAdmin(req);
       const request = loadRequest(Number(id));
+      const files = q.photosForRequest.all(request.id).map((p) => p.filename);
       q.deleteRequest.run(request.id);
+      await removePhotoFiles(files);
       sendJson(res, 200, { ok: true, deletedId: request.id });
     }],
 
@@ -970,19 +1052,19 @@ export function createApp(
       let responses;
       if (account.role === 'user' && request.user_id === account.id) {
         viewer = 'owner';
-        responses = q.responsesForRequest.all(request.id).map(serializeResponse);
+        responses = q.responsesForRequest.all(request.id).map(withPhotos);
       } else if (admin) {
         // Admins see every response, including ones hidden because the dealer is frozen.
         viewer = 'admin';
         responses = q.adminResponsesForRequest.all(request.id).map((x) => ({
-          ...serializeResponse(x),
+          ...withPhotos(x),
           dealerFrozen: Boolean(x.dealer_frozen_at),
         }));
       } else if (account.role === 'dealer') {
         // Dealers see only their own replies, not competitors'.
         assertVisibleToDealers(request);
         viewer = 'dealer';
-        responses = q.responsesForRequestByDealer.all(request.id, account.id).map(serializeResponse);
+        responses = q.responsesForRequestByDealer.all(request.id, account.id).map(withPhotos);
       } else {
         throw new HttpError(404, 'Request not found');
       }
@@ -1002,6 +1084,7 @@ export function createApp(
         throw new HttpError(404, 'Not found');
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'Method not allowed');
+      if (url.pathname.startsWith('/uploads/')) return await servePhoto(res, url.pathname.slice('/uploads/'.length));
       await serveStatic(res, url.pathname);
     } catch (err) {
       if (!(err instanceof HttpError)) console.error(err);

@@ -7,6 +7,7 @@ A two-sided marketplace for enthusiast cars — 911s, BMW M cars, special editio
 - **Admins** see every user and dealer with activity and last login, approve dealers, **edit, hide or delete any request**, and **freeze** accounts: a frozen account is signed out and can't sign in, a frozen user's requests are hidden from dealers, and a frozen dealer's responses are hidden from buyers.
 - **Accounts:** signup requires accepting the Terms and Privacy Policy and confirming the email address (needed before posting a request or responding); "forgot password" emails a one-hour, single-use reset link; repeated wrong passwords lock that email out for 15 minutes.
 - **Dealer alerts:** approved dealers get an email for each new request — all of them, only certain makes, or off, with an optional minimum budget (set on the **Alerts** page). Emails include a one-click unsubscribe (also via mail apps' `List-Unsubscribe`).
+- **Photos:** dealers can attach up to 6 photos to a response. The browser shrinks them (max 1600px JPEG) before upload; the server checks they're real JPEG/PNG/WebP files and stores them in `uploads/` next to the database (so on the persistent disk). Buyers see them on the request and in the response email.
 - Buyers get an **email alert** when a dealer responds, and see each response with the dealer's contact details. Dealers only see a buyer's first name and only their own responses, not competitors'.
 
 ## Run it
@@ -29,7 +30,7 @@ Environment variables:
 
 ## Backups
 
-Render snapshots the disk automatically every 24 hours and keeps each snapshot for at least 7 days (Disk page in the Render dashboard). Admins can also download a full copy of the database any time from **Admin → Download backup**; it's a standard SQLite file. Keep downloads somewhere private: they contain everyone's contact details (passwords are stored only as hashes).
+Render snapshots the disk automatically every 24 hours and keeps each snapshot for at least 7 days (Disk page in the Render dashboard). Admins can also download a full copy of the database any time from **Admin → Download backup**; it's a standard SQLite file. Dealer photos aren't in that download; they're in the `uploads/` folder on the disk, which Render's snapshots do cover. Keep downloads somewhere private: they contain everyone's contact details (passwords are stored only as hashes).
 
 ## Legal pages
 
@@ -72,12 +73,13 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 | GET | `/api/admin/requests` | admin | Every request with buyer details; `q` (vehicle, notes, location, buyer name/email, `#id`), `status` (`open` default, `fulfilled`, `closed`, `all`), `visibility` (`all`, `visible`, `hidden`), `sort` |
 | PATCH | `/api/admin/requests/:id` | admin | Edit any request field, set `status`, or `hidden: true` (with optional `reason`) / `false` to hide it from dealers |
 | DELETE | `/api/admin/requests/:id` | admin | Permanently delete a request and its responses |
-| POST | `/api/requests/:id/responses` | approved dealer | Respond with `message` and optional `price` |
+| POST | `/api/requests/:id/responses` | approved dealer | Respond with `message`, optional `price`, and optional `photos` (up to 6 image data URLs) |
+| GET | `/uploads/:file` | anyone with the link | A response photo (random, unguessable names) |
 
 `GET /api/requests` query parameters: `q` (free text; every word must match make/model/trim/color/location/notes, and a 4-digit year matches requests whose range covers it), `make`, `year` (requests whose range includes it), `condition`, `minBudget`, `status` (`open` by default, or `all`), `sort` (`newest`, `oldest`, `budget_desc`, `budget_asc`, `year_desc`, `year_asc`, `make`, `responses`), `limit`, `offset`.
 
 ## Ideas for next steps
 
 - SMS alerts; a daily digest option for dealer alerts.
-- Photos on dealer responses, and in-app messaging instead of sharing contact details.
+- In-app messaging instead of sharing contact details.
 - Deploy behind HTTPS (e.g. Fly.io, Render, Railway) with a persistent volume for the SQLite file, or move to Postgres.

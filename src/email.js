@@ -27,7 +27,7 @@ function vehicleName(r) {
 }
 
 // Email to a buyer when a dealer responds to one of their requests.
-export function newResponseEmail({ request, response, dealer, buyer, appUrl }) {
+export function newResponseEmail({ request, response, dealer, buyer, appUrl, photoUrls = [] }) {
   const vehicle = vehicleName(request);
   const dealerName = dealer.business_name || dealer.name;
   const link = `${appUrl}/#/request/${request.id}`;
@@ -42,6 +42,7 @@ export function newResponseEmail({ request, response, dealer, buyer, appUrl }) {
       `Hi ${buyer.name.split(/\s+/)[0]},\n\n` +
       `${dealerName} responded to your request for a ${vehicle}.\n\n` +
       `${price}"${response.message}"\n\n` +
+      (photoUrls.length ? `${photoUrls.length} photo${photoUrls.length === 1 ? '' : 's'} attached — see them on CarsFindMe.\n\n` : '') +
       `Contact: ${contact}\n\n` +
       `See all responses: ${link}\n\n` +
       `You can reply to this email to reach the dealer directly.\n— CarsFindMe`,
@@ -51,6 +52,14 @@ export function newResponseEmail({ request, response, dealer, buyer, appUrl }) {
         <p><strong>${esc(dealerName)}</strong> responded to your request for a <strong>${esc(vehicle)}</strong>.</p>
         ${response.price != null ? `<p style="font-size:18px">Asking price: <strong>${esc(money(response.price))}</strong></p>` : ''}
         <blockquote style="margin:0;padding:8px 14px;border-left:3px solid #b3261e;background:#f6f7f9;white-space:pre-wrap">${esc(response.message)}</blockquote>
+        ${
+          photoUrls.length
+            ? `<p>${photoUrls
+                .slice(0, 3)
+                .map((u) => `<a href="${esc(link)}"><img src="${esc(u)}" alt="Photo from ${esc(dealerName)}" width="170" style="width:170px;height:120px;object-fit:cover;border-radius:6px;margin:0 6px 6px 0"></a>`)
+                .join('')}${photoUrls.length > 3 ? `<br><span style="color:#5f6b7a">+ ${photoUrls.length - 3} more on CarsFindMe</span>` : ''}</p>`
+            : ''
+        }
         <p style="color:#5f6b7a">Contact: ${esc(contact)}</p>
         <p>${button(link, 'See all responses')}</p>
         <p style="color:#5f6b7a;font-size:13px">You can reply to this email to reach the dealer directly.<br>— CarsFindMe</p>

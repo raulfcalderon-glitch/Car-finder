@@ -7,6 +7,7 @@ import { createApp } from '../src/app.js';
 let server;
 let base;
 let testDb;
+let uploadsDir;
 const sentEmails = [];
 let failNextEmail = false;
 
@@ -19,10 +20,14 @@ before(async () => {
     sentEmails.push(email);
   };
   testDb = openDatabase(':memory:');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  uploadsDir = mkdtempSync(`${tmpdir()}/cf-uploads-`);
   server = createServer(createApp(testDb, {
     sendEmail,
     appUrl: 'https://cars.test',
     adminEmails: ['Admin@test.com', ' ', 'boss@test.com'],
+    uploadsDir,
     // Tests create many accounts from one address; keep the real login limits so they're tested.
     limits: { signupPerIp: { max: 10_000, windowMs: 60_000 }, emailPerIp: { max: 10_000, windowMs: 60_000 } },
   }));
@@ -696,4 +701,56 @@ test('dealers get new-request alerts that match their settings', async () => {
   const adminCall = await admin();
   await adminCall('PATCH', `/api/admin/accounts/${everything.account.id}`, { frozen: true });
   assert.deepEqual(await alertsFor('Ferrari', 'F50', 5000000), ['alerts-big@test.com']);
+});
+
+test('dealers can attach photos to a response', async () => {
+  const { readdirSync, existsSync } = await import('node:fs');
+  const buyer = await signup('user', { email: 'photo-buyer@test.com' });
+  const dealer = await signup('dealer', { businessName: 'Photo Motors' });
+  const { body } = await buyer('POST', '/api/requests', { make: 'Porsche', model: '911 R' });
+  const id = body.request.id;
+
+  // Tiny stand-ins with real image signatures.
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('jpeg body')]);
+  const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.from('png body')]);
+  const dataUrl = (buf, type) => `data:${type};base64,${buf.toString('base64')}`;
+
+  const bad = (photos) => dealer('POST', `/api/requests/${id}/responses`, { message: 'x', photos });
+  assert.equal((await bad([dataUrl(Buffer.from('<svg onload=alert(1)>'), 'image/svg+xml')])).status, 400, 'not a real image');
+  assert.equal((await bad(['https://example.com/a.jpg'])).status, 400);
+  assert.equal((await bad(Array(7).fill(dataUrl(jpeg, 'image/jpeg')))).status, 400, 'max 6');
+  assert.equal((await bad('nope')).status, 400);
+
+  sentEmails.length = 0;
+  const res = await dealer('POST', `/api/requests/${id}/responses`, {
+    message: 'Here it is',
+    photos: [dataUrl(jpeg, 'image/jpeg'), dataUrl(png, 'image/png')],
+  });
+  assert.equal(res.status, 201, JSON.stringify(res.body));
+  const [first, second] = res.body.response.photos;
+  assert.match(first, /^\/uploads\/[a-f0-9]{32}\.jpg$/);
+  assert.match(second, /\.png$/);
+
+  // Served back byte-for-byte with long caching; bad names are refused.
+  const served = await fetch(base + first);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('content-type'), 'image/jpeg');
+  assert.match(served.headers.get('cache-control'), /immutable/);
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), jpeg);
+  assert.equal((await fetch(`${base}/uploads/..%2fapp.js`)).status, 404);
+  assert.equal((await fetch(`${base}/uploads/${'0'.repeat(32)}.jpg`)).status, 404);
+
+  // The buyer sees them on the request and in the email.
+  const view = await buyer('GET', `/api/requests/${id}`);
+  assert.deepEqual(view.body.responses[0].photos, [first, second]);
+  await tick();
+  const email = sentEmails.find((e) => e.to === 'photo-buyer@test.com');
+  assert.ok(email.html.includes(`https://cars.test${first}`));
+  assert.match(email.text, /2 photos attached/);
+
+  // Deleting the request removes the files too.
+  const files = res.body.response.photos.map((p) => p.split('/').pop());
+  assert.ok(files.every((f) => existsSync(`${uploadsDir}/${f}`)));
+  await (await admin())('DELETE', `/api/admin/requests/${id}`);
+  assert.ok(files.every((f) => !readdirSync(uploadsDir).includes(f)));
 });

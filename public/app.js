@@ -545,6 +545,13 @@ async function requestDetail(id) {
           ${x.price != null ? `<div>Asking: <strong>${money(x.price)}</strong></div>` : ''}
           <p style="white-space:pre-wrap">${esc(x.message)}</p>
           ${
+            x.photos?.length
+              ? `<div class="photo-grid">${x.photos
+                  .map((src, i) => `<a href="${esc(src)}" target="_blank" rel="noopener"><img src="${esc(src)}" alt="Photo ${i + 1}" loading="lazy"></a>`)
+                  .join('')}</div>`
+              : ''
+          }
+          ${
             seesContacts
               ? `<div class="muted">Contact: ${esc(x.dealer.name)} · <a href="mailto:${esc(x.dealer.email)}">${esc(x.dealer.email)}</a>${
                   x.dealer.phone ? ` · <a href="tel:${esc(x.dealer.phone)}">${esc(x.dealer.phone)}</a>` : ''
@@ -625,6 +632,12 @@ async function requestDetail(id) {
             <form>
               <label>Asking price (USD) <span class="hint">optional</span><input name="price" type="number" min="0" step="500"></label>
               <label>Message <textarea name="message" required placeholder="I have a 1987 Carrera Targa in Guards Red, 64k miles, full records…"></textarea></label>
+              <div class="photo-picker">
+                <label class="button secondary small" for="photo-input">Add photos</label>
+                <input id="photo-input" type="file" accept="image/*" multiple hidden>
+                <span class="muted" id="photo-hint">Up to ${MAX_PHOTOS} photos</span>
+                <div class="photo-grid" id="photo-previews"></div>
+              </div>
               <p class="error"></p>
               <button type="submit">Send response</button>
             </form>
@@ -665,11 +678,54 @@ async function requestDetail(id) {
   );
   const form = view.querySelector('form');
   if (form) {
+    const photos = []; // shrunk data URLs, in the order they'll be sent
+    const previews = view.querySelector('#photo-previews');
+    const hint = view.querySelector('#photo-hint');
+    const drawPreviews = () => {
+      previews.innerHTML = photos
+        .map((src, i) => `<div class="photo-preview"><img src="${src}" alt=""><button type="button" data-remove="${i}" aria-label="Remove photo">×</button></div>`)
+        .join('');
+      hint.textContent = photos.length ? `${photos.length} of ${MAX_PHOTOS} photos` : `Up to ${MAX_PHOTOS} photos`;
+    };
+    previews.addEventListener('click', (e) => {
+      const i = e.target.dataset.remove;
+      if (i !== undefined) {
+        photos.splice(Number(i), 1);
+        drawPreviews();
+      }
+    });
+    view.querySelector('#photo-input').addEventListener('change', async (e) => {
+      const files = [...e.target.files].slice(0, MAX_PHOTOS - photos.length);
+      e.target.value = '';
+      hint.textContent = 'Preparing photos…';
+      for (const file of files) {
+        try {
+          photos.push(await shrinkPhoto(file));
+        } catch {
+          form.querySelector('.error').textContent = `Couldn't read ${file.name}. Try a JPEG or PNG.`;
+        }
+      }
+      drawPreviews();
+    });
     bindForm(form, async (data) => {
-      await api(`/api/requests/${r.id}/responses`, { method: 'POST', body: data });
+      await api(`/api/requests/${r.id}/responses`, { method: 'POST', body: { ...data, photos } });
       render();
     });
   }
+}
+
+const MAX_PHOTOS = 6;
+
+// Resizes a photo on the device (max 1600px, JPEG) so uploads are quick even on mobile data.
+async function shrinkPhoto(file, maxSide = 1600) {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  return canvas.toDataURL('image/jpeg', 0.82);
 }
 
 function dealerNotApproved() {

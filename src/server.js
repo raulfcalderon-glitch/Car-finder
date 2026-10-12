@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { openDatabase } from './db.js';
 import { createApp } from './app.js';
 import { createMailer } from './email.js';
@@ -19,6 +20,8 @@ const warning = process.env.RENDER && !onDisk ? ' — WARNING: not on a persiste
 console.log(`Database: ${dbFile} (${accounts} accounts)${warning}`);
 const app = createApp(db, {
   secureCookies: process.env.NODE_ENV === 'production',
+  // Dealer photos sit next to the database, so they're on the persistent disk too.
+  uploadsDir: join(dirname(dbFile), 'uploads'),
   // Comma-separated emails of people who can approve dealers, e.g. "you@example.com,partner@example.com".
   // ADMIN_EMAIL (singular) is accepted too, since it's an easy name to type.
   adminEmails: [process.env.ADMIN_EMAILS, process.env.ADMIN_EMAIL].filter(Boolean).join(',').split(','),

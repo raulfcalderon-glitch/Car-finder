@@ -81,6 +81,16 @@ const SCHEMA = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_responses_request ON responses(request_id);
+
+  -- Photos a dealer attaches to a response. Files live in the uploads folder next to the database.
+  CREATE TABLE IF NOT EXISTS response_photos (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    response_id INTEGER NOT NULL REFERENCES responses(id) ON DELETE CASCADE,
+    filename    TEXT NOT NULL UNIQUE,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_response_photos_response ON response_photos(response_id);
 `;
 
 // What dealers are allowed to see: no hidden requests and nothing from frozen accounts.
