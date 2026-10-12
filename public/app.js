@@ -333,6 +333,7 @@ function landing() {
       <div class="card audience reveal" style="--d:0">
         <h2>For enthusiasts</h2>
         <ul class="checks">
+          <li><strong>Get access to off-market cars</strong> — many special cars trade quietly through dealer networks and never get listed publicly</li>
           <li>Stop refreshing listings — let the cars come to you</li>
           <li>Your email and phone stay private; dealers only see your first name</li>
           <li>Offers arrive with prices and photos</li>
