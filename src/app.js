@@ -21,6 +21,7 @@ import { REQUEST_LIFETIME_DAYS, REMINDER_DAYS_BEFORE } from './db.js';
 import { createLimiter } from './ratelimit.js';
 import { googleCertsFetcher, verifyGoogleIdToken } from './google.js';
 import { normalizeMake } from '../public/vehicles.js';
+import { FEATURES } from '../public/features.js';
 import {
   CHECKS,
   DEALER_TYPES,
@@ -528,6 +529,7 @@ export function createApp(
     limits = {},
     uploadsDir = null, // where dealer photos are stored; photos are disabled without it
     googleClientId = null, // turns on "Continue with Google" for buyers
+    dealerDirectory = FEATURES.dealerDirectory,
     fetchGoogleCerts = googleCertsFetcher(),
   } = {},
 ) {
@@ -1601,6 +1603,7 @@ export function createApp(
 
     // Public directory of verified dealers, with filters by specialty, state and free text.
     ['GET', /^\/api\/dealers$/, async (req, res, _m, url) => {
+      if (!dealerDirectory) throw new HttpError(404, 'Not found');
       const params = url.searchParams;
       const viewer = currentAccount(req);
       const all = q.listedDealers.all({ demo: viewer && isAdmin(viewer) ? 1 : 0 }).map((d) => ({
@@ -1827,6 +1830,7 @@ export function createApp(
     // Sample dealers only admins can see, to preview the homepage strip and directory before real dealers join.
     ['POST', /^\/api\/admin\/demo-dealers$/, async (req, res) => {
       requireAdmin(req);
+      if (!dealerDirectory) throw new HttpError(404, 'The dealer directory is turned off');
       if (!q.demoDealers.all().length) {
         const checks = JSON.stringify(Object.fromEntries(['license', 'web', 'call'].map((k) => [k, { at: new Date().toISOString(), by: 'demo', note: 'Demo dealer' }])));
         for (const d of DEMO_DEALERS) {

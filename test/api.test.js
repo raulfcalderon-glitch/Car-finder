@@ -42,6 +42,7 @@ before(async () => {
     adminEmails: ['Admin@test.com', ' ', 'boss@test.com'],
     uploadsDir,
     googleClientId: 'test-client.apps.googleusercontent.com',
+    dealerDirectory: true, // switched off on the live site, but kept working
     fetchGoogleCerts: async () => ({ keys: [googleJwk] }),
     // Tests create many accounts from one address; keep the real login limits so they're tested.
     limits: { signupPerIp: { max: 10_000, windowMs: 60_000 }, emailPerIp: { max: 10_000, windowMs: 60_000 } },
@@ -1408,4 +1409,12 @@ test('admins can add demo dealers that only admins see', async () => {
   assert.equal((await adminCall('GET', '/api/admin/stats')).body.stats.demoDealers, 3);
   assert.equal((await adminCall('DELETE', '/api/admin/demo-dealers')).body.removed, 3);
   assert.equal(demoNames(await adminCall('GET', '/api/dealers')).length, 0);
+});
+
+test('the dealer directory can be switched off', async () => {
+  const off = createServer(createApp(openDatabase(':memory:'), { dealerDirectory: false }));
+  await new Promise((resolve) => off.listen(0, resolve));
+  const res = await fetch(`http://127.0.0.1:${off.address().port}/api/dealers`);
+  off.close();
+  assert.equal(res.status, 404);
 });

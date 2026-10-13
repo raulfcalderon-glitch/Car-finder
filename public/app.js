@@ -1,5 +1,6 @@
 import { TERMS_HTML, PRIVACY_HTML, LEGAL_UPDATED, CONTACT_EMAIL } from './legal.js';
 import { normalizeMake, suggestMake, matchMakes, matchModels } from './vehicles.js';
+import { FEATURES } from './features.js';
 
 const view = document.getElementById('view');
 const banner = document.getElementById('banner');
@@ -129,7 +130,7 @@ function navItems() {
       ? me.status === 'active'
         ? [['#/browse', 'Requests'], ['#/responses', 'My responses']]
         : []
-      : [['#/my', 'My requests'], ['#/new', 'New request'], ['#/dealers', 'Dealers']];
+      : [['#/my', 'My requests'], ['#/new', 'New request'], ...(FEATURES.dealerDirectory ? [['#/dealers', 'Dealers']] : [])];
   if (me.isAdmin) items.push(['#/admin', 'Admin']);
   return items;
 }
@@ -138,7 +139,7 @@ const chevron = '<svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><pa
 
 function renderNav() {
   if (!me) {
-    nav.innerHTML = `<a class="nav-login nav-dealers" href="#/dealers">Dealers</a><a class="nav-login" href="#/login">Log in</a><a class="button" href="#/signup">Sign up</a>`;
+    nav.innerHTML = `${FEATURES.dealerDirectory ? '<a class="nav-login nav-dealers" href="#/dealers">Dealers</a>' : ''}<a class="nav-login" href="#/login">Log in</a><a class="button" href="#/signup">Sign up</a>`;
     return;
   }
   const path = location.hash.split('?')[0] || '#/';
@@ -337,7 +338,7 @@ function landing() {
       <div class="ticker" id="ticker" hidden aria-label="Latest requests on CarsFindMe"></div>
     </section>
 
-    <section class="section dealer-strip" id="dealer-strip"></section>
+    ${FEATURES.dealerDirectory ? '<section class="section dealer-strip" id="dealer-strip"></section>' : ''}
 
     <section class="section">
       <h2 class="section-title reveal">How it works</h2>
@@ -1692,7 +1693,7 @@ const LISTING_BLOCKERS = {
 
 // Tells the dealer (or an admin) whether the profile shows in the Dealers directory, and what's missing.
 function listingNote(p, { forAdmin = false } = {}) {
-  if (!p.listingBlockers) return '';
+  if (!FEATURES.dealerDirectory || !p.listingBlockers) return '';
   if (!p.listingBlockers.length) {
     return `<div class="listing-note ok">✓ ${forAdmin ? 'Listed' : 'Your profile is listed'} in the <a href="#/dealers">Dealers directory</a>.</div>`;
   }
@@ -2192,7 +2193,9 @@ function adminHeader(stats, tab) {
       <a class="button ${tab === 'reports' ? '' : 'secondary'}" href="#/admin/reports">Reports${stats.openReports ? ` (${stats.openReports})` : ''}</a>
       <a class="backup-link" href="/api/admin/backup" download title="Download a copy of the whole database">Download backup</a>
       ${
-        stats.demoDealers
+        !FEATURES.dealerDirectory
+          ? ''
+          : stats.demoDealers
           ? `<button class="link-button" id="demo-dealers" data-action="remove">Remove ${stats.demoDealers} demo dealers</button>`
           : '<button class="link-button" id="demo-dealers" data-action="add" title="Sample verified dealers only admins can see, to preview the homepage and Dealers page">Add 3 demo dealers</button>'
       }
@@ -2666,7 +2669,8 @@ async function render() {
     '/renew': renewPage,
     '/signup': signup,
     '/contact': contactPage,
-    '/dealers': dealersPage,
+    // While the directory is switched off, old links to it go to the homepage.
+    '/dealers': FEATURES.dealerDirectory ? dealersPage : () => go('#/'),
   };
   if (path in openRoutes) return openRoutes[path](params);
   const dealerPage = path.match(/^\/dealer\/([a-z0-9-]+)$/);
