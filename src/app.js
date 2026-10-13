@@ -865,6 +865,17 @@ export function createApp(
   // Only approved, active dealers have a public profile (admins can still see hidden ones).
   const profileIsPublic = (d) => d.status === 'active' && !d.frozen_at && !d.profile_hidden_at;
 
+  // What's stopping a dealer from appearing in the directory (same rules as the listedDealers query).
+  function listingBlockers(d) {
+    return [
+      d.status !== 'active' && 'approval',
+      d.frozen_at && 'frozen',
+      d.profile_hidden_at && 'hidden',
+      !d.avatar && 'logo',
+      !String(d.bio ?? '').trim() && 'about',
+    ].filter(Boolean);
+  }
+
   function dealerProfile(d, { forAdmin = false, forOwner = false } = {}) {
     return {
       slug: d.profile_slug,
@@ -889,6 +900,7 @@ export function createApp(
         ? { hidden: Boolean(d.profile_hidden_at), hiddenReason: forAdmin ? d.profile_hidden_reason : undefined, status: d.status, frozen: Boolean(d.frozen_at) }
         : {}),
       ...(forAdmin ? { accountId: d.id } : {}),
+      ...(forAdmin || forOwner ? { listingBlockers: listingBlockers(d) } : {}),
     };
   }
 

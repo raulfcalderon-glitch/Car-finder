@@ -1347,6 +1347,8 @@ test('the public dealer directory lists only approved dealers with finished prof
     return d;
   };
   const before = (await listed()).total;
+  const unlisted = await signup('dealer', { businessName: 'Directory Blockers' });
+  assert.deepEqual((await unlisted('GET', '/api/me/profile')).body.profile.listingBlockers, ['logo', 'about'], 'tells the dealer what is missing');
   const a = await finished('Directory Porsche House', { bio: 'Porsche people.', specialties: ['Porsche', 'Air-cooled 911s'], city: 'Miami, FL' });
   await finished('Directory JDM Garage', { bio: 'Imports from Japan.', specialties: ['Nissan', 'Toyota'], city: 'Austin, Texas' });
   const noLogo = await signup('dealer', { businessName: 'Directory No Logo' });

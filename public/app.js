@@ -1681,6 +1681,25 @@ function dealerCard(d, { compact = false } = {}) {
     </a>`;
 }
 
+const LISTING_BLOCKERS = {
+  approval: 'the dealer account is approved',
+  frozen: 'the account is unfrozen',
+  hidden: 'CarsFindMe un-hides the profile',
+  logo: 'a logo or photo is uploaded',
+  about: 'the About text is filled in',
+};
+
+// Tells the dealer (or an admin) whether the profile shows in the Dealers directory, and what's missing.
+function listingNote(p, { forAdmin = false } = {}) {
+  if (!p.listingBlockers) return '';
+  if (!p.listingBlockers.length) {
+    return `<div class="listing-note ok">✓ ${forAdmin ? 'Listed' : 'Your profile is listed'} in the <a href="#/dealers">Dealers directory</a>.</div>`;
+  }
+  return `<div class="listing-note">${forAdmin ? 'Not in the Dealers directory yet.' : "<strong>You're not in the Dealers directory yet.</strong>"} It shows up once ${p.listingBlockers
+    .map((b) => LISTING_BLOCKERS[b])
+    .join(' and ')}.</div>`;
+}
+
 // Public directory of verified dealers.
 async function dealersPage(params) {
   const state = { q: params.get('q') ?? '', specialty: params.get('specialty') ?? '', state: params.get('state') ?? '' };
@@ -1819,6 +1838,7 @@ async function dealerProfilePage(slug) {
       <span class="row"><a class="button secondary small" href="#/admin/account/${p.accountId}">Dealer account</a>
       ${p.coverUrl ? '<button class="secondary small" id="admin-remove-cover">Remove cover</button>' : ''}
       ${p.hidden ? '<button class="small" id="admin-unhide">Show profile</button>' : '<button class="danger small" id="admin-hide">Hide profile</button>'}</span></div>`);
+    notes.push(listingNote(p, { forAdmin: true }));
   }
   view.innerHTML = notes.join('') + profileHtml(p, { viewer });
 
@@ -1868,6 +1888,7 @@ async function editDealerProfile() {
       <p class="muted">Buyers see this when they tap your name on a response, and anyone can open it at
         <a href="/d/${esc(p.slug)}" target="_blank">${esc(location.host)}/d/${esc(p.slug)}</a>. Share it on Instagram and your website.
         ${p.public ? '' : '<br><strong>It goes public once your dealer account is approved.</strong>'}</p>
+      ${listingNote(p)}
 
       <section class="card">
         <h2>Logo &amp; cover photo</h2>
