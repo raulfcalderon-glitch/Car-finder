@@ -42,6 +42,7 @@ const SCHEMA = `
     cover            TEXT, -- cover photo filename in the uploads folder
     profile_hidden_at     TEXT, -- set by an admin to take the profile offline
     profile_hidden_reason TEXT,
+    is_demo          INTEGER, -- 1 for sample dealers only admins can see (to preview the directory)
     -- Dealer application details, collected at signup and checked by an admin before approval.
     dealer_type      TEXT, -- 'dealer' (licensed dealer) or 'broker' (broker / independent specialist)
     job_title        TEXT,
@@ -207,6 +208,7 @@ function migrate(db) {
   }
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_google_sub ON accounts(google_sub)');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_profile_slug ON accounts(profile_slug)');
+  if (!columns.includes('is_demo')) db.exec('ALTER TABLE accounts ADD COLUMN is_demo INTEGER');
   if (!columns.includes('founded_year')) db.exec('ALTER TABLE accounts ADD COLUMN founded_year INTEGER');
   if (!columns.includes('alert_min_budget')) db.exec('ALTER TABLE accounts ADD COLUMN alert_min_budget INTEGER');
   if (!columns.includes('email_verified_at')) {

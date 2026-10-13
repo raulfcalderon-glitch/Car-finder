@@ -1380,3 +1380,32 @@ test('the public dealer directory lists only approved dealers with finished prof
   await (await admin())('PATCH', `/api/admin/accounts/${a.account.id}`, { profileHidden: true });
   assert.ok(!(await listed()).dealers.some((d) => d.businessName === 'Directory Porsche House'));
 });
+
+test('admins can add demo dealers that only admins see', async () => {
+  const adminCall = await admin();
+  const anon = client();
+  const buyer = await signup('user');
+  assert.equal((await buyer('POST', '/api/admin/demo-dealers')).status, 403);
+  assert.equal((await adminCall('POST', '/api/admin/demo-dealers')).body.count, 3);
+  assert.equal((await adminCall('POST', '/api/admin/demo-dealers')).body.count, 3, 'adding twice keeps 3');
+
+  const demoNames = (r) => r.body.dealers.filter((d) => d.demo).map((d) => d.businessName);
+  assert.equal(demoNames(await adminCall('GET', '/api/dealers')).length, 3);
+  assert.equal(demoNames(await anon('GET', '/api/dealers')).length, 0, 'the public never sees them');
+  assert.equal(demoNames(await buyer('GET', '/api/dealers')).length, 0);
+  const slug = (await adminCall('GET', '/api/dealers')).body.dealers.find((d) => d.demo).slug;
+  assert.equal((await anon('GET', `/api/dealers/${slug}`)).status, 404);
+  const asAdmin = (await adminCall('GET', `/api/dealers/${slug}`)).body.profile;
+  assert.equal(asAdmin.verified, true);
+  assert.deepEqual(asAdmin.listingBlockers, []);
+
+  // They never get request alerts.
+  sentEmails.length = 0;
+  await buyer('POST', '/api/requests', { make: 'Porsche', model: 'Demo alert test' });
+  await tick();
+  assert.ok(!sentEmails.some((e) => e.to.startsWith('demo-')));
+
+  assert.equal((await adminCall('GET', '/api/admin/stats')).body.stats.demoDealers, 3);
+  assert.equal((await adminCall('DELETE', '/api/admin/demo-dealers')).body.removed, 3);
+  assert.equal(demoNames(await adminCall('GET', '/api/dealers')).length, 0);
+});

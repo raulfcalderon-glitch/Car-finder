@@ -294,6 +294,25 @@ const esc = (v) =>
   String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const MAX_GALLERY = 8;
+
+// Admin-only sample dealers (see POST /api/admin/demo-dealers). Never shown to the public.
+const DEMO_DEALERS = [
+  {
+    business_name: 'Coastline Classics (Demo)', city: 'Miami, FL', license_state: 'Florida', founded_year: 1998,
+    website: 'example.com', specialties: ['Porsche', 'Air-cooled 911s', 'BMW'],
+    bio: 'Family-owned since 1998. We specialize in air-cooled Porsche 911s and classic BMWs, with a full pre-purchase inspection on every car and nationwide shipping.',
+  },
+  {
+    business_name: 'Northern Motorworks (Demo)', city: 'New York, NY', license_state: 'New York', founded_year: 2006,
+    website: 'example.com', specialties: ['Ferrari', 'Lamborghini', 'McLaren'],
+    bio: 'Pre-owned Italian and British supercars with documented service history. We source off-market cars through a network of collectors.',
+  },
+  {
+    business_name: 'Pacific Import Garage (Demo)', city: 'Los Angeles, CA', license_state: 'California', founded_year: 2012,
+    website: 'example.com', specialties: ['Nissan', 'Toyota', 'Honda'],
+    bio: 'JDM icons imported and made road-legal: Skyline GT-R, Supra, NSX and more. Ask us about 25-year-rule imports.',
+  },
+];
 const MAX_SPECIALTIES = 8;
 
 // "Stuttgart Classics, LLC" → "stuttgart-classics-llc"
@@ -578,6 +597,7 @@ export function createApp(
         dealer.alert_token = newSessionToken();
         q.setAlertToken.run(dealer.alert_token, dealer.id);
       }
+      if (dealer.is_demo) continue;
       notify(
         newRequestAlertEmail({
           dealer,
@@ -625,7 +645,7 @@ export function createApp(
     alertableDealers: db.prepare(`
       SELECT * FROM accounts
       WHERE role = 'dealer' AND status = 'active' AND frozen_at IS NULL AND email_verified_at IS NOT NULL
-        AND COALESCE(alert_mode, 'all') != 'off'`),
+        AND COALESCE(alert_mode, 'all') != 'off' AND is_demo IS NULL`),
     setAlertToken: db.prepare('UPDATE accounts SET alert_token = ? WHERE id = ?'),
     setAvatar: db.prepare('UPDATE accounts SET avatar = ? WHERE id = ?'),
     setCover: db.prepare('UPDATE accounts SET cover = ? WHERE id = ?'),
@@ -649,7 +669,17 @@ export function createApp(
       SELECT a.*, (SELECT COUNT(*) FROM visible_responses x WHERE x.dealer_id = a.id) AS response_count
       FROM accounts a
       WHERE a.role = 'dealer' AND a.status = 'active' AND a.frozen_at IS NULL AND a.profile_hidden_at IS NULL
-        AND a.profile_slug IS NOT NULL AND a.avatar IS NOT NULL AND TRIM(COALESCE(a.bio, '')) != ''`),
+        AND a.profile_slug IS NOT NULL AND TRIM(COALESCE(a.bio, '')) != ''
+        AND (a.avatar IS NOT NULL OR a.is_demo = 1) AND (a.is_demo IS NULL OR :demo = 1)`),
+    demoDealers: db.prepare("SELECT * FROM accounts WHERE is_demo = 1"),
+    deleteDemoDealers: db.prepare('DELETE FROM accounts WHERE is_demo = 1'),
+    insertDemoDealer: db.prepare(`
+      INSERT INTO accounts (email, password_hash, name, role, business_name, phone, status, email_verified_at, terms_accepted_at,
+        dealer_type, job_title, business_address, website, license_number, license_state, verification_checks,
+        bio, specialties, city, founded_year, is_demo, alert_mode)
+      VALUES (:email, :password_hash, :name, 'dealer', :business_name, '555-0100', 'active', datetime('now'), datetime('now'),
+        'dealer', 'Owner', :city, :website, 'DEMO', :license_state, :checks,
+        :bio, :specialties, :city, :founded_year, 1, 'off')`),
     setDealerApplication: db.prepare(`
       UPDATE accounts SET dealer_type = :dealer_type, job_title = :job_title, business_address = :business_address,
         website = :website, license_number = :license_number, license_state = :license_state, experience = :experience
@@ -863,7 +893,7 @@ export function createApp(
   }
 
   // Only approved, active dealers have a public profile (admins can still see hidden ones).
-  const profileIsPublic = (d) => d.status === 'active' && !d.frozen_at && !d.profile_hidden_at;
+  const profileIsPublic = (d) => d.status === 'active' && !d.frozen_at && !d.profile_hidden_at && !d.is_demo;
 
   // What's stopping a dealer from appearing in the directory (same rules as the listedDealers query).
   function listingBlockers(d) {
@@ -871,7 +901,7 @@ export function createApp(
       d.status !== 'active' && 'approval',
       d.frozen_at && 'frozen',
       d.profile_hidden_at && 'hidden',
-      !d.avatar && 'logo',
+      !d.avatar && !d.is_demo && 'logo',
       !String(d.bio ?? '').trim() && 'about',
     ].filter(Boolean);
   }
@@ -896,6 +926,7 @@ export function createApp(
       responseCount: q.dealerResponseCount.get(d.id).n,
       gallery: q.galleryFor.all(d.id).map((p) => ({ id: p.id, url: photoUrl(p.filename), caption: p.caption })),
       public: profileIsPublic(d),
+      demo: Boolean(d.is_demo) || undefined,
       ...(forAdmin || forOwner
         ? { hidden: Boolean(d.profile_hidden_at), hiddenReason: forAdmin ? d.profile_hidden_reason : undefined, status: d.status, frozen: Boolean(d.frozen_at) }
         : {}),
@@ -1145,12 +1176,13 @@ export function createApp(
     const one = (sql) => db.prepare(sql).get().n;
     return {
       users: one("SELECT COUNT(*) AS n FROM accounts WHERE role = 'user'"),
-      dealersApproved: one("SELECT COUNT(*) AS n FROM accounts WHERE role = 'dealer' AND status = 'active' AND frozen_at IS NULL"),
+      dealersApproved: one("SELECT COUNT(*) AS n FROM accounts WHERE role = 'dealer' AND status = 'active' AND frozen_at IS NULL AND is_demo IS NULL"),
       dealersPending: one("SELECT COUNT(*) AS n FROM accounts WHERE role = 'dealer' AND status = 'pending' AND frozen_at IS NULL"),
       frozen: one('SELECT COUNT(*) AS n FROM accounts WHERE frozen_at IS NOT NULL'),
       openRequests: one("SELECT COUNT(*) AS n FROM visible_requests WHERE status = 'open'"),
       hiddenRequests: one("SELECT COUNT(*) AS n FROM requests WHERE hidden_at IS NOT NULL AND status = 'open'"),
       openReports: one("SELECT COUNT(*) AS n FROM dealer_reports WHERE status = 'open'"),
+      demoDealers: one('SELECT COUNT(*) AS n FROM accounts WHERE is_demo = 1'),
       requestsLast7Days: one("SELECT COUNT(*) AS n FROM requests WHERE created_at >= datetime('now', '-7 days')"),
       responsesLast7Days: one("SELECT COUNT(*) AS n FROM responses WHERE created_at >= datetime('now', '-7 days')"),
       newAccountsLast7Days: one("SELECT COUNT(*) AS n FROM accounts WHERE created_at >= datetime('now', '-7 days')"),
@@ -1570,7 +1602,8 @@ export function createApp(
     // Public directory of verified dealers, with filters by specialty, state and free text.
     ['GET', /^\/api\/dealers$/, async (req, res, _m, url) => {
       const params = url.searchParams;
-      const all = q.listedDealers.all().map((d) => ({
+      const viewer = currentAccount(req);
+      const all = q.listedDealers.all({ demo: viewer && isAdmin(viewer) ? 1 : 0 }).map((d) => ({
         slug: d.profile_slug,
         businessName: d.business_name || d.name,
         type: d.dealer_type ?? 'dealer',
@@ -1583,6 +1616,7 @@ export function createApp(
         responseCount: d.response_count,
         memberSince: d.created_at,
         bio: d.bio,
+        demo: Boolean(d.is_demo) || undefined,
       }));
       // Filter choices come from everyone listed, so they don't shrink as you filter.
       const counts = {};
@@ -1788,6 +1822,35 @@ export function createApp(
       const { changes } = q.setReportStatus.run({ status, by: me.email, id: Number(id) });
       if (!changes) throw new HttpError(404, 'Report not found');
       sendJson(res, 200, { report: serializeReport(db.prepare(`${REPORT_SELECT} WHERE d.id = ?`).get(Number(id))) });
+    }],
+
+    // Sample dealers only admins can see, to preview the homepage strip and directory before real dealers join.
+    ['POST', /^\/api\/admin\/demo-dealers$/, async (req, res) => {
+      requireAdmin(req);
+      if (!q.demoDealers.all().length) {
+        const checks = JSON.stringify(Object.fromEntries(['license', 'web', 'call'].map((k) => [k, { at: new Date().toISOString(), by: 'demo', note: 'Demo dealer' }])));
+        for (const d of DEMO_DEALERS) {
+          const { lastInsertRowid } = q.insertDemoDealer.run({
+            ...d,
+            email: `demo-${slugify(d.business_name)}@example.com`,
+            password_hash: hashPassword(newSessionToken()), // nobody can log in as a demo dealer
+            name: 'Demo Dealer',
+            specialties: JSON.stringify(d.specialties),
+            checks,
+          });
+          ensureSlug(q.accountById.get(lastInsertRowid));
+        }
+      }
+      sendJson(res, 201, { count: q.demoDealers.all().length });
+    }],
+
+    ['DELETE', /^\/api\/admin\/demo-dealers$/, async (req, res) => {
+      requireAdmin(req);
+      const demo = q.demoDealers.all();
+      const files = demo.flatMap((d) => [d.avatar, d.cover, ...q.galleryFor.all(d.id).map((p) => p.filename)]).filter(Boolean);
+      q.deleteDemoDealers.run();
+      await removePhotoFiles(files);
+      sendJson(res, 200, { removed: demo.length });
     }],
 
     // A consistent copy of the whole database, for safekeeping.

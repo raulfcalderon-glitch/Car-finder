@@ -1674,6 +1674,7 @@ function dealerCard(d, { compact = false } = {}) {
       <div class="dealer-card-body">
         ${avatar({ role: 'dealer', businessName: d.businessName, avatarUrl: d.avatarUrl }, 56)}
         <strong class="dealer-card-name">${esc(d.businessName)}</strong>
+        ${d.demo ? '<span class="pill pending demo-pill">Demo · only admins see this</span>' : ''}
         <div class="dealer-card-meta">${d.verified ? verifiedBadge(d.type) : ''}${d.city ? `<span class="muted">${esc(d.city)}</span>` : ''}</div>
         ${!compact && d.tagline ? `<p class="muted dealer-card-tagline">${esc(d.tagline)}${d.tagline.length >= 140 ? '…' : ''}</p>` : ''}
         ${chips.length ? `<div class="specialty-chips">${chips.map((c) => `<span class="specialty">${esc(c)}</span>`).join('')}${more > 0 ? `<span class="specialty muted">+${more}</span>` : ''}</div>` : ''}
@@ -1840,6 +1841,7 @@ async function dealerProfilePage(slug) {
       ${p.hidden ? '<button class="small" id="admin-unhide">Show profile</button>' : '<button class="danger small" id="admin-hide">Hide profile</button>'}</span></div>`);
     notes.push(listingNote(p, { forAdmin: true }));
   }
+  if (p.demo) notes.unshift('<div class="listing-note">This is a <strong>demo dealer</strong>. Only admins can see it; remove demo dealers from the Admin page.</div>');
   view.innerHTML = notes.join('') + profileHtml(p, { viewer });
 
   view.querySelector('#share-profile').addEventListener('click', async (e) => {
@@ -2189,8 +2191,23 @@ function adminHeader(stats, tab) {
       <a class="button ${tab === 'requests' ? '' : 'secondary'}" href="#/admin/requests">Requests</a>
       <a class="button ${tab === 'reports' ? '' : 'secondary'}" href="#/admin/reports">Reports${stats.openReports ? ` (${stats.openReports})` : ''}</a>
       <a class="backup-link" href="/api/admin/backup" download title="Download a copy of the whole database">Download backup</a>
+      ${
+        stats.demoDealers
+          ? `<button class="link-button" id="demo-dealers" data-action="remove">Remove ${stats.demoDealers} demo dealers</button>`
+          : '<button class="link-button" id="demo-dealers" data-action="add" title="Sample verified dealers only admins can see, to preview the homepage and Dealers page">Add 3 demo dealers</button>'
+      }
     </div>`;
 }
+
+// Admin header: add or remove the admin-only demo dealers.
+document.addEventListener('click', async (e) => {
+  const button = e.target.closest('#demo-dealers');
+  if (!button) return;
+  const add = button.dataset.action === 'add';
+  if (add && !confirm('Add 3 demo dealers?\n\nThey look like verified dealers on the homepage and Dealers page, but ONLY admins can see them. Visitors, buyers and dealers never do, and they never get alerts.\n\nRemove them any time from here.')) return;
+  await api('/api/admin/demo-dealers', { method: add ? 'POST' : 'DELETE' });
+  render();
+});
 
 const ADMIN_REQUEST_STATUSES = [
   ['open', 'Open'],
