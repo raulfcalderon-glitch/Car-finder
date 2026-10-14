@@ -534,3 +534,8 @@ label:has(> .suggestions), .make-field label { position: relative; }
 .listing-note { border: 1px solid var(--warn); color: var(--text); background: var(--surface); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px; font-size: .92rem; }
 .listing-note.ok { border-color: var(--ok); color: var(--ok); font-weight: 600; }
 .demo-pill { align-self: flex-start; }
+
+/* Header logo (car + wordmark image) */
+.brand-logo { height: 44px; width: auto; display: block; }
+@media (max-width: 480px) { .brand-logo { height: 30px; } }
+@media (max-width: 380px) { .brand-logo { height: 26px; } }
