@@ -1,0 +1,89 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..900;1,62..125,400..900&family=Michroma&family=Unbounded:wght@500;700;800&family=Playfair+Display:ital,wght@1,700;1,800&family=Big+Shoulders+Display:wght@700;800;900&family=Saira:ital,wdth,wght@0,62..125,500..900;1,62..125,500..900&family=Lexend:wght@600;700;800&family=Kanit:ital,wght@1,700;1,800&family=Cormorant+Garamond:wght@600;700&family=Yellowtail&family=Space+Grotesk:wght@600;700&family=Inter:wght@400..700&display=block">
+<style>
+:root{--ink:#0b0c0e;--paper:#f4f2ee;--red:#e2283f;--deep:#b80d26}
+*{box-sizing:border-box}
+body{margin:0;background:#dedbd4;font-family:Inter,sans-serif;color:#15171a;width:1500px;padding:44px}
+h1{font-family:Archivo;font-stretch:118%;font-weight:800;font-size:42px;margin:0 0 6px;letter-spacing:-.01em}
+.sub{color:#5c6370;margin:0 0 30px;font-size:17px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+.c{background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 1px 0 rgba(0,0,0,.06)}
+.top{display:grid;grid-template-columns:230px 1fr}
+.icon{background:#ece9e3;display:grid;place-items:center;height:250px}
+.icon svg{width:150px;height:150px;filter:drop-shadow(0 10px 18px rgba(0,0,0,.18))}
+.locks{display:grid;grid-template-rows:1fr 1fr}
+.dark{background:var(--ink);color:#f2f1ee;display:flex;align-items:center;justify-content:center;gap:14px;padding:0 20px}
+.light{background:var(--paper);color:#111;display:flex;align-items:center;justify-content:center;gap:12px;padding:0 20px}
+.lock svg{height:46px;width:auto}
+.meta{padding:16px 22px 20px}
+.meta b{font-family:Archivo;font-stretch:112%;font-size:19px}
+.meta p{margin:6px 0 0;color:#5c6370;font-size:14.5px;line-height:1.5}
+.n{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--deep);color:#fff;font-weight:700;font-size:13px;margin-right:9px;vertical-align:2px}
+</style></head><body>
+<h1>CarsFindMe — round 3</h1>
+<p class="sub">Each shown as an app icon (left), and as the full logo on the dark site header and on light paper.</p>
+<div class="grid" id="g"></div>
+<script>
+const R='#e2283f', D='#b80d26', GOLD='#c9a86a';
+const inv = (fg) => fg === '#111' ? '#f4f2ee' : '#0b0c0e';
+const tile = (id, a, b) => `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="100" height="100" rx="24" fill="url(#${id})"/>`;
+const C = [];
+
+// 1 — Apex line
+const curb = (cx, cy, r, w, a0, a1, n) => { let s=''; for (let k=0;k<n;k++){ const t0=a0+(a1-a0)*k/n, t1=a0+(a1-a0)*(k+1)/n; const p=(t)=>[cx+r*Math.cos(t*Math.PI/180), cy+r*Math.sin(t*Math.PI/180)]; const [x0,y0]=p(t0),[x1,y1]=p(t1); s+=`<path d="M${x0} ${y0} A${r} ${r} 0 0 1 ${x1} ${y1}" stroke="${k%2?'#f4f2ee':R}" stroke-width="${w}" fill="none"/>`;} return s; };
+C.push({t:'Apex', d:'The racing line through a corner: red-and-white curbing on the inside, a single clean line clipping the apex, marked with a red dot. Says "precision" and "we hit the mark". Minimal and confident.',
+icon:`<svg viewBox="0 0 100 100">${tile('t1','#1c1e22','#060607')}${curb(26,74,30,7,-90,0,7)}<path d="M14 16 C 40 22, 50 36, 53.5 49 C 57 62, 70 78, 90 86" fill="none" stroke="#f4f2ee" stroke-width="6" stroke-linecap="round"/><circle cx="53.5" cy="49" r="7" fill="${R}" stroke="#0b0c0e" stroke-width="3"/></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 60">${curb(12,52,22,5,-90,0,6)}<path d="M4 6 C 22 10, 29 20, 31.5 29 C 34 39, 43 50, 58 55" fill="none" stroke="${fg}" stroke-width="4.5" stroke-linecap="round"/><circle cx="31.5" cy="29" r="5" fill="${R}" stroke="${inv(fg)}" stroke-width="2"/>
+<text x="76" y="42" font-family="Saira" font-style="italic" font-stretch="112%" font-weight="800" font-size="31" letter-spacing="1" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+// 2 — Key pin
+C.push({t:'Key Pin', d:'A car key whose head is a map pin, and the pin\'s dot is the key-ring hole. "Keys to the car you found." A clever double meaning in one shape.',
+icon:`<svg viewBox="0 0 100 100">${tile('t2','#f0354b','#9e0a1f')}<g transform="rotate(-38 50 50)"><path d="M50 62 C 44 55, 31 45, 31 33 A 19 19 0 0 1 69 33 C 69 45, 56 55, 50 62 Z" fill="#f4f2ee"/><circle cx="50" cy="33" r="7" fill="#c51b33"/><path d="M46 57 H54 V74 H58 V79 H54 V83 H59 V88 H54 V92 H46 Z" fill="#f4f2ee"/></g></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 420 60"><g transform="rotate(-38 24 30)"><path d="M24 38 C 20 34, 12 28, 12 20.5 A 12 12 0 0 1 36 20.5 C 36 28, 28 34, 24 38 Z" fill="${R}"/><circle cx="24" cy="20.5" r="4.4" fill="${inv(fg)}"/><path d="M21.5 35 H26.5 V46 H29 V49 H26.5 V51.5 H29.5 V54.5 H26.5 V57 H21.5 Z" fill="${R}"/></g>
+<text x="56" y="42" font-family="Lexend" font-weight="700" font-size="30" letter-spacing="-.6" fill="${fg}">cars<tspan fill="${R}">find</tspan>me</text></svg>`});
+
+// 3 — Knock-off spinner
+const spinner = (s, mid, edge, center, txt) => `<defs><linearGradient id="sp${s}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${mid}"/><stop offset="1" stop-color="${edge}"/></linearGradient></defs>
+<path d="M50 34 C 40 34, 34 30, 24 22 C 14 14, 6 24, 10 38 C 13 47, 13 53, 10 62 C 6 76, 14 86, 24 78 C 34 70, 40 66, 50 66 C 60 66, 66 70, 76 78 C 86 86, 94 76, 90 62 C 87 53, 87 47, 90 38 C 94 24, 86 14, 76 22 C 66 30, 60 34, 50 34 Z" fill="url(#sp${s})"/>
+<circle cx="50" cy="50" r="19" fill="${center}" stroke="${edge}" stroke-width="2"/><text x="50" y="57.5" text-anchor="middle" font-family="Kanit" font-style="italic" font-weight="800" font-size="20" fill="${txt}">CF</text>`;
+C.push({t:'Knock-Off Spinner', d:'The two-eared knock-off wheel nut from classic racing cars (Jaguar, Ferrari, Cobra), with "CF" in the center. A detail true enthusiasts recognize instantly.',
+icon:`<svg viewBox="0 0 100 100">${tile('t3','#1c1e22','#060607')}<g transform="translate(50 50) scale(.86) translate(-50 -50)">${spinner('i','#f1efea','#8d9097',R,'#f4f2ee')}</g></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 430 60"><g transform="scale(.6)">${spinner('l'+fg.length, fg==='#111'?'#3a3d43':'#f1efea', fg==='#111'?'#0b0c0e':'#8d9097', R, '#f4f2ee')}</g>
+<text x="70" y="42" font-family="Kanit" font-style="italic" font-weight="800" font-size="33" fill="${fg}">Cars<tspan fill="${R}">Find</tspan>Me</text></svg>`});
+
+// 4 — Winged crest
+const wing = (dir, col) => { let s=''; for (let k=0;k<4;k++){ const y=40+k*6, len=30-k*6; s+=`<path d="M${50+dir*16} ${y} C ${50+dir*(16+len*.5)} ${y-5-k}, ${50+dir*(16+len)} ${y-3}, ${50+dir*(18+len)} ${y-1} C ${50+dir*(16+len*.8)} ${y+3}, ${50+dir*(18+len*.3)} ${y+3}, ${50+dir*16} ${y+3} Z" fill="${col}"/>`;} return s; };
+C.push({t:'Winged Crest', d:'A classic winged emblem, like a vintage hood ornament or coachbuilder badge, with a "CFM" shield at the center and a refined serif name. Old-money elegance.',
+icon:`<svg viewBox="0 0 100 100">${tile('t4','#1c1e22','#060607')}${wing(-1,GOLD)}${wing(1,GOLD)}<path d="M50 30 L63 35 V50 C63 60 57 66 50 70 C43 66 37 60 37 50 V35 Z" fill="${D}" stroke="${GOLD}" stroke-width="2"/><text x="50" y="55" text-anchor="middle" font-family="Cormorant Garamond" font-weight="700" font-size="10" fill="#f4f2ee">CFM</text></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 460 60"><g transform="translate(-14 -18) scale(.95)">${wing(-1,GOLD)}${wing(1,GOLD)}<path d="M50 30 L63 35 V50 C63 60 57 66 50 70 C43 66 37 60 37 50 V35 Z" fill="${D}" stroke="${GOLD}" stroke-width="2"/></g>
+<text x="98" y="41" font-family="Cormorant Garamond" font-weight="700" font-size="31" letter-spacing="5" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+// 5 — Euro plate
+C.push({t:'Plate', d:'A European-style number plate reading "CFM", with a red band where the country code goes. Instantly car culture, a little cheeky, and great for stickers and social posts.',
+icon:`<svg viewBox="0 0 100 100">${tile('t5','#f0354b','#9e0a1f')}<g transform="rotate(-8 50 50)"><rect x="8" y="34" width="84" height="32" rx="5" fill="#f4f2ee" stroke="#0b0c0e" stroke-width="2.5"/><rect x="11" y="37" width="13" height="26" rx="2" fill="${D}"/><circle cx="17.5" cy="44" r="3" fill="none" stroke="#f4f2ee" stroke-width="1.2" stroke-dasharray="1 1.4"/><text x="17.5" y="58" text-anchor="middle" font-family="Saira" font-stretch="75%" font-weight="800" font-size="8" fill="#f4f2ee">US</text><text x="58" y="60" text-anchor="middle" font-family="Saira" font-stretch="70%" font-weight="700" font-size="21" letter-spacing="1" fill="#0b0c0e">CFM 26</text></g></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 430 60"><rect x="2" y="14" width="70" height="32" rx="5" fill="#f4f2ee" stroke="${fg==='#111'?'#0b0c0e':'#f4f2ee'}" stroke-width="2"/><rect x="5" y="17" width="11" height="26" rx="2" fill="${D}"/><text x="44" y="39.5" text-anchor="middle" font-family="Saira" font-stretch="70%" font-weight="800" font-size="21" letter-spacing="1" fill="#0b0c0e">CFM</text>
+<text x="86" y="42" font-family="Saira" font-stretch="80%" font-weight="800" font-size="34" letter-spacing="1.5" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+// 6 — Rearview mirror
+C.push({t:'Rearview', d:'A rearview mirror with headlights in it: the car you\'ve been looking for is right behind you. A story-telling mark with a wink.',
+icon:`<svg viewBox="0 0 100 100">${tile('t6','#f4f2ee','#ddd8cf')}<rect x="47" y="14" width="6" height="16" rx="3" fill="#0b0c0e"/><path d="M12 36 C 12 30, 18 28, 50 28 C 82 28, 88 30, 88 36 L 85 62 C 84 68, 78 70, 50 70 C 22 70, 16 68, 15 62 Z" fill="#0b0c0e"/><path d="M18 38 C 18 34, 24 33, 50 33 C 76 33, 82 34, 82 38 L 80 60 C 79 64, 74 65, 50 65 C 26 65, 21 64, 20 60 Z" fill="url(#mir)"/><defs><linearGradient id="mir" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3a4250"/><stop offset="1" stop-color="#14171c"/></linearGradient></defs><path d="M30 60 C 30 50, 38 44, 50 44 C 62 44, 70 50, 70 60 Z" fill="#0b0c0e" opacity=".9"/><circle cx="39" cy="55" r="4.5" fill="#f4f2ee"/><circle cx="61" cy="55" r="4.5" fill="${R}"/><path d="M24 40 L 34 36" stroke="#fff" stroke-width="2.5" stroke-linecap="round" opacity=".5"/></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 430 60"><path d="M2 20 C 2 16, 6 15, 28 15 C 50 15, 54 16, 54 20 L 52 40 C 51.5 44, 48 45, 28 45 C 8 45, 4.5 44, 4 40 Z" fill="${fg}"/><path d="M15 41 C 15 34, 20 30, 28 30 C 36 30, 41 34, 41 41 Z" fill="${inv(fg)}"/><circle cx="22" cy="37.5" r="2.8" fill="${fg}"/><circle cx="34" cy="37.5" r="2.8" fill="${R}"/>
+<text x="70" y="41" font-family="Space Grotesk" font-weight="700" font-size="31" letter-spacing="-.8" fill="${fg}">Cars<tspan fill="${R}">Find</tspan>Me</text></svg>`});
+
+// 7 — Pixel-speed C
+const pixC = (size, col, fadeTo) => { let s=''; const cx=50, cy=50, step=size; for (let x=10;x<90;x+=step) for (let y=10;y<90;y+=step){ const px=x+step/2, py=y+step/2; const d=Math.hypot(px-cx,py-cy), ang=Math.atan2(py-cy,px-cx)*180/Math.PI; if (d<24||d>40) continue; if (ang>-48 && ang<48) continue; const checker=((x-10)/step+(y-10)/step)%2===0; const o = px<50?1:Math.max(.15,1-(px-50)/45); const red = ang>30&&ang<70 || ang<-30&&ang>-70; s+=`<rect x="${x+.5}" y="${y+.5}" width="${step-1}" height="${step-1}" rx="1" fill="${red?R:(checker?col:fadeTo)}" opacity="${red?1:o}"/>`;} return s; };
+C.push({t:'Pixel C', d:'A bold "C" built from a checkered grid that dissolves toward the open side, as if it\'s moving fast. Modern and techy, with racing heritage in the pattern.',
+icon:`<svg viewBox="0 0 100 100">${tile('t7','#1c1e22','#060607')}${pixC(8,'#f4f2ee','#5b6069')}</svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 60"><g transform="translate(-6 -10) scale(.8)">${pixC(8, fg, fg==='#111'?'#b9b4aa':'#5b6069')}</g>
+<text x="72" y="42" font-family="Archivo" font-stretch="125%" font-weight="900" font-size="30" letter-spacing="-.5" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+// 8 — Signature script
+C.push({t:'Signature', d:'A flowing, hand-signed script like the badges on classic cars of the \'50s–\'70s, underlined by a swoosh that ends in a locator dot. Warm, nostalgic, very "car guy".',
+icon:`<svg viewBox="0 0 100 100">${tile('t8','#f0354b','#9e0a1f')}<text x="50" y="62" text-anchor="middle" font-family="Yellowtail" font-size="46" fill="#f4f2ee">Cf</text><path d="M18 72 C 40 64, 64 64, 80 68" stroke="#f4f2ee" stroke-width="3.4" stroke-linecap="round" fill="none"/><circle cx="84" cy="69" r="4" fill="#0b0c0e" stroke="#f4f2ee" stroke-width="2"/></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 330 64"><text x="6" y="40" font-family="Yellowtail" font-size="44" fill="${fg}">Cars<tspan fill="${R}">Find</tspan>Me</text><path d="M12 52 C 90 44, 170 44, 232 49" stroke="${R}" stroke-width="3" stroke-linecap="round" fill="none"/><circle cx="238" cy="49.5" r="4" fill="${R}"/></svg>`});
+
+document.getElementById('g').innerHTML = C.map((m,i)=>`
+<div class="c"><div class="top"><div class="icon">${m.icon}</div>
+<div class="locks"><div class="dark lock">${m.lock('#f2f1ee')}</div><div class="light lock">${m.lock('#111')}</div></div></div>
+<div class="meta"><b><span class="n">${i+1}</span>${m.t}</b><p>${m.d}</p></div></div>`).join('');
+</script></body></html>
