@@ -1,0 +1,132 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..900;1,62..125,400..900&family=Michroma&family=Unbounded:wght@500;700;800&family=Playfair+Display:ital,wght@1,700;1,800&family=Big+Shoulders+Display:wght@700;800;900&family=Inter:wght@400..700&display=block">
+<style>
+:root{--ink:#0b0c0e;--paper:#f4f2ee;--red:#e2283f;--deep:#b80d26}
+*{box-sizing:border-box}
+body{margin:0;background:#dedbd4;font-family:Inter,sans-serif;color:#15171a;width:1500px;padding:44px}
+h1{font-family:Archivo;font-stretch:118%;font-weight:800;font-size:42px;margin:0 0 6px;letter-spacing:-.01em}
+.sub{color:#5c6370;margin:0 0 30px;font-size:17px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+.c{background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 1px 0 rgba(0,0,0,.06)}
+.top{display:grid;grid-template-columns:230px 1fr}
+.icon{background:#ece9e3;display:grid;place-items:center;height:250px}
+.icon svg{width:150px;height:150px;filter:drop-shadow(0 10px 18px rgba(0,0,0,.18))}
+.locks{display:grid;grid-template-rows:1fr 1fr}
+.dark{background:var(--ink);color:#f2f1ee;display:flex;align-items:center;justify-content:center;gap:14px;padding:0 20px}
+.light{background:var(--paper);color:#111;display:flex;align-items:center;justify-content:center;gap:12px;padding:0 20px}
+.lock svg{height:46px;width:auto}
+.meta{padding:16px 22px 20px}
+.meta b{font-family:Archivo;font-stretch:112%;font-size:19px}
+.meta p{margin:6px 0 0;color:#5c6370;font-size:14.5px;line-height:1.5}
+.n{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--deep);color:#fff;font-weight:700;font-size:13px;margin-right:9px;vertical-align:2px}
+</style></head><body>
+<h1>CarsFindMe — round 2</h1>
+<p class="sub">Each shown as an app icon (left), and as the full logo on the dark site header and on light paper.</p>
+<div class="grid" id="g"></div>
+<script>
+const R='#e2283f', D='#b80d26';
+// Each concept: icon(svg for the tile), lockup(color) -> svg string for horizontal logo
+const C = [];
+
+// A — Checkered check
+C.push({t:'Checkered Check', d:'A check mark ("found it") built out of a checkered flag. Bold, instantly automotive, and it reads at any size. Set with a wide, technical wordmark.',
+icon:`<svg viewBox="0 0 100 100"><defs>
+<linearGradient id="a1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1b1d21"/><stop offset="1" stop-color="#050506"/></linearGradient>
+<pattern id="chkA" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(-38)"><rect width="9" height="9" fill="#f4f2ee"/><rect width="4.5" height="4.5" fill="#111"/><rect x="4.5" y="4.5" width="4.5" height="4.5" fill="#111"/></pattern></defs>
+<rect width="100" height="100" rx="24" fill="url(#a1)"/>
+<path d="M24 52 L42 70 L77 30" fill="none" stroke="url(#chkA)" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="77" cy="30" r="7.5" fill="${R}"/></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 470 60"><defs><pattern id="chkL${fg.length}" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(-38)"><rect width="7" height="7" fill="${fg}"/><rect width="3.5" height="3.5" fill="${fg==='#111'?'#f4f2ee':'#0b0c0e'}"/><rect x="3.5" y="3.5" width="3.5" height="3.5" fill="${fg==='#111'?'#f4f2ee':'#0b0c0e'}"/></pattern></defs>
+<path d="M6 31 L20 45 L47 14" fill="none" stroke="url(#chkL${fg.length})" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/><circle cx="47" cy="14" r="5.5" fill="${R}"/>
+<text x="66" y="42" font-family="Michroma" font-size="25" letter-spacing="3.5" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+// B — Coupe pin
+C.push({t:'Coupe Pin', d:'A map pin with a classic sports-coupe silhouette inside: "your car, located". Works for non-enthusiasts at a glance, with a profile enthusiasts will appreciate.',
+icon:`<svg viewBox="0 0 100 100"><defs><linearGradient id="b1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0354b"/><stop offset="1" stop-color="#a10a20"/></linearGradient></defs>
+<rect width="100" height="100" rx="24" fill="url(#b1)"/>
+<path d="M50 90 C 50 90, 18 61, 18 40 A 32 32 0 0 1 82 40 C 82 61, 50 90, 50 90 Z" fill="#f4f2ee"/>
+<g transform="translate(28 30) scale(0.76)"><path d="M0 16 C0 12.5 1.6 11 5 10.2 L13 8.6 C17 3.2 22.5 0 30 0 C36.5 0 41 2.6 45.5 7.6 L52.5 9 C56 9.8 58 12 58 15.5 L58 18 L0 18 Z" fill="#0b0c0e"/><path d="M15.5 8.4 C19 4.6 23.5 2.6 29 2.6 L29 8 Z M32 2.7 C37 2.9 40.5 5 43.6 8 L32 8 Z" fill="#f4f2ee" opacity=".9"/><circle cx="13" cy="18" r="5.6" fill="#0b0c0e"/><circle cx="13" cy="18" r="2.2" fill="#f4f2ee"/><circle cx="45" cy="18" r="5.6" fill="#0b0c0e"/><circle cx="45" cy="18" r="2.2" fill="#f4f2ee"/></g>
+<path d="M26 54 H74" stroke="${R}" stroke-width="2.6" stroke-linecap="round"/></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 60"><path d="M24 58 C 24 58, 4 40, 4 25 A 20 20 0 0 1 44 25 C 44 40, 24 58, 24 58 Z" fill="${R}"/>
+<g transform="translate(10.5 17) scale(0.47)"><path d="M0 16 C0 12.5 1.6 11 5 10.2 L13 8.6 C17 3.2 22.5 0 30 0 C36.5 0 41 2.6 45.5 7.6 L52.5 9 C56 9.8 58 12 58 15.5 L58 18 L0 18 Z" fill="${fg==='#111'?'#f4f2ee':'#0b0c0e'}"/><path d="M15.5 8.4 C19 4.6 23.5 2.6 29 2.6 L29 8 Z M32 2.7 C37 2.9 40.5 5 43.6 8 L32 8 Z" fill="${R}" opacity=".9"/><circle cx="13" cy="18" r="5.6" fill="${fg==='#111'?'#f4f2ee':'#0b0c0e'}"/><circle cx="13" cy="18" r="2.2" fill="${R}"/><circle cx="45" cy="18" r="5.6" fill="${fg==='#111'?'#f4f2ee':'#0b0c0e'}"/><circle cx="45" cy="18" r="2.2" fill="${R}"/></g>
+<text x="60" y="42" font-family="Archivo" font-style="italic" font-stretch="125%" font-weight="800" font-size="32" letter-spacing="-.5" fill="${fg}">cars<tspan fill="${R}">find</tspan>me</text></svg>`});
+
+// C — Le Mans pin
+C.push({t:'Le Mans Pin', d:'A map pin wearing twin racing stripes, like a classic GT race car. Simple enough for a favicon, with real motorsport character.',
+icon:`<svg viewBox="0 0 100 100"><defs><linearGradient id="c1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1b1d21"/><stop offset="1" stop-color="#050506"/></linearGradient>
+<clipPath id="cp"><path d="M50 88 C 50 88, 22 60, 22 40 A 28 28 0 0 1 78 40 C 78 60, 50 88, 50 88 Z"/></clipPath></defs>
+<rect width="100" height="100" rx="24" fill="url(#c1)"/>
+<path d="M50 88 C 50 88, 22 60, 22 40 A 28 28 0 0 1 78 40 C 78 60, 50 88, 50 88 Z" fill="${R}"/>
+<g clip-path="url(#cp)"><rect x="39" y="0" width="8" height="100" fill="#f4f2ee"/><rect x="53" y="0" width="8" height="100" fill="#f4f2ee"/></g>
+<circle cx="50" cy="40" r="9" fill="#0b0c0e"/><circle cx="50" cy="40" r="3.5" fill="#f4f2ee"/></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 430 60"><defs><clipPath id="cpl${fg.length}"><path d="M22 57 C 22 57, 5 40, 5 26.5 A 17 17 0 0 1 39 26.5 C 39 40, 22 57, 22 57 Z"/></clipPath></defs>
+<path d="M22 57 C 22 57, 5 40, 5 26.5 A 17 17 0 0 1 39 26.5 C 39 40, 22 57, 22 57 Z" fill="${R}"/><g clip-path="url(#cpl${fg.length})"><rect x="15" y="0" width="5" height="60" fill="#f4f2ee"/><rect x="24" y="0" width="5" height="60" fill="#f4f2ee"/></g><circle cx="22" cy="26.5" r="5.5" fill="#0b0c0e"/>
+<text x="54" y="42" font-family="Unbounded" font-weight="700" font-size="27" letter-spacing="-.3" fill="${fg}">carsfind<tspan fill="${R}">me</tspan></text></svg>`});
+
+// D — Heritage club badge
+C.push({t:'Heritage Club Badge', d:'A round club badge in the spirit of classic car clubs and coachbuilders: "CF" in a script monogram, the name set around the ring. Premium, collectible, perfect for merch.',
+icon:`<svg viewBox="0 0 100 100"><defs><radialGradient id="d1" cx=".35" cy=".3" r=".9"><stop offset="0" stop-color="#ef3a50"/><stop offset="1" stop-color="#8f0a1d"/></radialGradient>
+<path id="ring" d="M50 50 m-35 0 a35 35 0 1 1 70 0 a35 35 0 1 1 -70 0"/></defs>
+<circle cx="50" cy="50" r="48" fill="#0b0c0e"/><circle cx="50" cy="50" r="45.5" fill="none" stroke="#c9a86a" stroke-width="1.4"/>
+<text font-family="Archivo" font-stretch="125%" font-weight="800" font-size="7.6" fill="#f4f2ee"><textPath href="#ring" textLength="216" lengthAdjust="spacing">CARSFINDME · ENTHUSIAST SOURCING · EST 2026 ·</textPath></text>
+<circle cx="50" cy="50" r="27" fill="url(#d1)"/><circle cx="50" cy="50" r="27" fill="none" stroke="#c9a86a" stroke-width="1.4"/>
+<text x="50" y="60" text-anchor="middle" font-family="Playfair Display" font-style="italic" font-weight="800" font-size="30" fill="#f4f2ee">CF</text></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 60"><circle cx="28" cy="30" r="26" fill="#0b0c0e" stroke="#c9a86a" stroke-width="1.5"/><circle cx="28" cy="30" r="17" fill="${D}" stroke="#c9a86a" stroke-width="1"/><text x="28" y="37" text-anchor="middle" font-family="Playfair Display" font-style="italic" font-weight="800" font-size="19" fill="#f4f2ee">CF</text>
+<text x="70" y="41" font-family="Playfair Display" font-style="italic" font-weight="800" font-size="33" fill="${fg}">Cars<tspan fill="${R}">Find</tspan>Me</text></svg>`});
+
+// E — Vanishing road F
+C.push({t:'Open Road "F"', d:'The letter F drawn as a road disappearing to the horizon, with a dashed center line: the search, and the road trip home. Strong as an icon on its own.',
+icon:`<svg viewBox="0 0 100 100"><defs><linearGradient id="e1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a0a10"/><stop offset=".55" stop-color="#b80d26"/><stop offset="1" stop-color="#f0354b"/></linearGradient></defs>
+<rect width="100" height="100" rx="24" fill="url(#e1)"/>
+<path d="M30 92 L44 22 L80 22 L78 33 L50 33 L47.5 47 L70 47 L68 57 L45.5 57 L38 92 Z" fill="#0b0c0e"/>
+<path d="M41.5 88 L44 76 M45.6 68 L47.2 60 M48.5 53 L49.5 48 M50.6 41 L51.3 37" stroke="#f4f2ee" stroke-width="2.4" stroke-linecap="round"/>
+<circle cx="80" cy="16" r="5" fill="#f4f2ee" opacity=".9"/></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 430 60"><path d="M6 58 L15 6 L41 6 L39.6 14 L20 14 L18.4 24 L34 24 L32.6 31 L17 31 L12 58 Z" fill="${R}"/><path d="M15 55 L16.8 46 M18.6 40 L19.6 35" stroke="${fg==='#111'?'#f4f2ee':'#0b0c0e'}" stroke-width="2" stroke-linecap="round"/>
+<text x="54" y="45" font-family="Big Shoulders Display" font-weight="900" font-size="44" letter-spacing="1.5" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+// F — Locator wordmark
+C.push({t:'Locator Wordmark', d:'A custom lowercase wordmark: the dot on the "i" becomes a red locator ring, and a speed stripe runs under "find". The icon is just the "f" with its locator.',
+icon:`<svg viewBox="0 0 100 100"><defs><linearGradient id="f1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4f2ee"/><stop offset="1" stop-color="#e3dfd6"/></linearGradient></defs>
+<rect width="100" height="100" rx="24" fill="url(#f1)"/>
+<text x="38" y="78" text-anchor="middle" font-family="Archivo" font-stretch="125%" font-weight="900" font-size="74" fill="#0b0c0e">f</text>
+<circle cx="70" cy="30" r="10" fill="none" stroke="${R}" stroke-width="5"/><circle cx="70" cy="30" r="3.4" fill="${R}"/>
+<rect x="18" y="84" width="64" height="5" rx="2.5" fill="${R}"/></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 330 64" data-locator><text x="2" y="44" font-family="Archivo" font-stretch="125%" font-weight="900" font-size="40" letter-spacing="-1" fill="${fg}">carsfındme</text>
+<g class="loc"><circle r="5.5" fill="none" stroke="${R}" stroke-width="3"/><circle r="1.9" fill="${R}"/></g>
+<rect class="bar" y="52" height="4.5" rx="2.25" fill="${R}"/></svg>`});
+
+// G — Tach monogram
+C.push({t:'Redline Monogram', d:'A "C" drawn as a tachometer arc with tick marks, swinging into the redline, wrapped around a sharp "F". Precise, instrument-panel feel; great on dark backgrounds.',
+icon:`<svg viewBox="0 0 100 100"><defs><linearGradient id="g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1b1d21"/><stop offset="1" stop-color="#050506"/></linearGradient></defs>
+<rect width="100" height="100" rx="24" fill="url(#g1)"/>
+<path d="M74 28 A 30 30 0 1 0 74 72" fill="none" stroke="#f4f2ee" stroke-width="6" stroke-linecap="round"/>
+<path d="M74 72 A 30 30 0 0 0 79 66" fill="none" stroke="${R}" stroke-width="6" stroke-linecap="round"/>
+<g stroke="#f4f2ee" stroke-width="2" stroke-linecap="round" opacity=".6">${[150,180,210,240,270].map(a=>{const r=a*Math.PI/180;return `<line x1="${50+21*Math.cos(r)}" y1="${50+21*Math.sin(r)}" x2="${50+25*Math.cos(r)}" y2="${50+25*Math.sin(r)}"/>`}).join('')}</g>
+<path d="M45 34 H66 M45 34 V68 M45 50 H60" stroke="${R}" stroke-width="7" stroke-linecap="square" fill="none"/></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 60"><path d="M48 12 A 21 21 0 1 0 48 48" fill="none" stroke="${fg}" stroke-width="4.5" stroke-linecap="round"/><path d="M48 48 A 21 21 0 0 0 52 43.5" fill="none" stroke="${R}" stroke-width="4.5" stroke-linecap="round"/><path d="M26 18.5 H41 M26 18.5 V42 M26 30 H37" stroke="${R}" stroke-width="5" fill="none"/>
+<text x="68" y="41" font-family="Michroma" font-size="24" letter-spacing="2" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+// H — Headlight eyes / grille
+C.push({t:'Twin Headlights', d:'Two round headlights and a grille line form a friendly "face" of a classic sports car, with one light as a red locator. Characterful and memorable, a bit playful.',
+icon:`<svg viewBox="0 0 100 100"><defs><linearGradient id="h1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0354b"/><stop offset="1" stop-color="#a10a20"/></linearGradient></defs>
+<rect width="100" height="100" rx="24" fill="url(#h1)"/>
+<path d="M14 62 C 14 40, 30 30, 50 30 C 70 30, 86 40, 86 62 C 86 70, 80 74, 72 74 H28 C 20 74, 14 70, 14 62 Z" fill="#0b0c0e"/>
+<circle cx="32" cy="52" r="10" fill="#f4f2ee"/><circle cx="32" cy="52" r="5" fill="#0b0c0e"/>
+<circle cx="68" cy="52" r="10" fill="#f4f2ee"/><circle cx="68" cy="52" r="5.5" fill="${R}"/>
+<path d="M42 64 H58" stroke="#f4f2ee" stroke-width="3" stroke-linecap="round"/></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 60"><path d="M4 40 C 4 24, 16 16, 30 16 C 44 16, 56 24, 56 40 C 56 46, 52 49, 46 49 H14 C 8 49, 4 46, 4 40 Z" fill="${fg}"/><circle cx="17" cy="34" r="6.5" fill="${fg==='#111'?'#f4f2ee':'#0b0c0e'}"/><circle cx="43" cy="34" r="6.5" fill="${fg==='#111'?'#f4f2ee':'#0b0c0e'}"/><circle cx="43" cy="34" r="3.5" fill="${R}"/>
+<text x="72" y="42" font-family="Unbounded" font-weight="800" font-size="27" fill="${fg}">Cars<tspan fill="${R}">Find</tspan>Me</text></svg>`});
+
+document.getElementById('g').innerHTML = C.map((m,i)=>`
+<div class="c"><div class="top"><div class="icon">${m.icon}</div>
+<div class="locks"><div class="dark lock">${m.lock('#f2f1ee')}</div><div class="light lock">${m.lock('#111')}</div></div></div>
+<div class="meta"><b><span class="n">${String.fromCharCode(65+i)}</span>${m.t}</b><p>${m.d}</p></div></div>`).join('');
+// Place the locator over the dotless "ı" and the stripe under "find", measured from the real font.
+document.fonts.ready.then(() => document.querySelectorAll('[data-locator]').forEach((svg) => {
+  const t = svg.querySelector('text');
+  const i = t.getStartPositionOfChar(5).x, iEnd = t.getEndPositionOfChar(5).x;
+  svg.querySelector('.loc').setAttribute('transform', `translate(${(i + iEnd) / 2} 11)`);
+  const f = t.getStartPositionOfChar(4).x, d = t.getEndPositionOfChar(7).x;
+  const bar = svg.querySelector('.bar'); bar.setAttribute('x', f); bar.setAttribute('width', d - f);
+}));
+</script></body></html>
