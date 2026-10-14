@@ -539,3 +539,6 @@ label:has(> .suggestions), .make-field label { position: relative; }
 .brand-logo { height: 44px; width: auto; display: block; }
 @media (max-width: 480px) { .brand-logo { height: 30px; } }
 @media (max-width: 380px) { .brand-logo { height: 26px; } }
+/* On wide screens, line the header up with the 1100px page content instead of the window edges. */
+.topbar { padding-left: max(20px, calc((100% - 1100px) / 2)); padding-right: max(20px, calc((100% - 1100px) / 2)); }
+@media (max-width: 480px) { .topbar { padding-left: 14px; padding-right: 14px; } }
