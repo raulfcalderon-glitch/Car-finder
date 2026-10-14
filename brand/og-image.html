@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=Inter:wght@400..700&display=block">
+<style>
+html,body{margin:0}
+body{width:1200px;height:630px;position:relative;overflow:hidden;background:#000;font-family:Inter,sans-serif}
+.glow{position:absolute;left:50%;top:44%;width:1100px;height:620px;transform:translate(-50%,-50%);background:radial-gradient(closest-side,rgba(226,40,63,.30),rgba(226,40,63,.08) 55%,transparent 75%)}
+.floor{position:absolute;left:0;right:0;bottom:0;height:200px;background:linear-gradient(180deg,transparent,rgba(255,255,255,.035))}
+/* Everything important sits in the centered 630x630 square, so square-cropping apps still show the logo. */
+.logo{position:absolute;left:50%;top:248px;width:560px;transform:translate(-50%,-50%)}
+.tag{position:absolute;left:0;right:0;top:372px;text-align:center;font-family:Archivo;font-stretch:112%;font-weight:700;font-size:28px;color:#f2f1ee;letter-spacing:-.005em;line-height:1.3}
+.tag span{color:#e2283f}
+.sub{position:absolute;left:0;right:0;top:458px;text-align:center;font-size:19px;color:#a3a7ae;letter-spacing:.14em;text-transform:uppercase;font-weight:600}
+.bar{position:absolute;left:50%;bottom:0;width:240px;height:6px;transform:translateX(-50%);background:#e2283f;border-radius:6px 6px 0 0}
+</style></head><body>
+<div class="glow"></div><div class="floor"></div>
+<img class="logo" src="logo.png">
+<div class="tag">Tell us the car.<br>The right dealers <span>find it.</span></div>
+<div class="sub">Enthusiast · Collector · Special Edition</div>
+<div class="bar"></div>
+</body></html>
