@@ -2,7 +2,7 @@
 // Contact details below are the operator's; update them in one place here if they change.
 
 export const LEGAL_UPDATED = 'October 12, 2026';
-export const CONTACT_EMAIL = 'raulfcalderon@gmail.com';
+export const CONTACT_EMAIL = 'hello@carsfindme.com';
 
 export const TERMS_HTML = `
 <p class="legal-draft">Draft — pending legal review.</p>
@@ -20,7 +20,7 @@ export const TERMS_HTML = `
 <p><strong>Dealer profiles are public.</strong> Everything a dealer adds to their profile (business name, logo, cover and gallery photos, description, specialties, city, year founded, website and Instagram) can be seen by anyone, including people without an account. Dealers must only post photos they own or have permission to use, and must keep their profile accurate.</p>
 
 <h2>4. Do your own due diligence</h2>
-<p>Before paying anything, independently verify the seller, the vehicle and the title. Use a pre-purchase inspection, a reputable escrow service and a vehicle history report. <strong>Never wire money or send a deposit to someone you haven't verified.</strong> Report suspicious behavior to us at <a href="mailto:raulfcalderon@gmail.com">raulfcalderon@gmail.com</a>.</p>
+<p>Before paying anything, independently verify the seller, the vehicle and the title. Use a pre-purchase inspection, a reputable escrow service and a vehicle history report. <strong>Never wire money or send a deposit to someone you haven't verified.</strong> Report suspicious behavior to us at <a href="mailto:hello@carsfindme.com">hello@carsfindme.com</a>.</p>
 
 <h2>5. Acceptable use</h2>
 <p>Don't post anything false, misleading, fraudulent, illegal, infringing, abusive or spam. Don't use the Service to collect other users' information for unrelated purposes, scrape it, interfere with it, or try to access accounts or data you aren't authorized to access. Requests should be for genuine specialty, enthusiast or collector vehicles.</p>
@@ -44,7 +44,7 @@ export const TERMS_HTML = `
 <p>You agree to indemnify and hold CarsFindMe harmless from claims, losses and expenses (including reasonable legal fees) arising from your use of the Service, your content, your transactions with other users, or your breach of these Terms.</p>
 
 <h2>12. Ending your use</h2>
-<p>You can stop using the Service at any time and ask us to close your account at <a href="mailto:raulfcalderon@gmail.com">raulfcalderon@gmail.com</a>. We may suspend or end your access at any time. Sections that by their nature should survive (including 1, 4, 7, 9, 10, 11 and 14) survive termination.</p>
+<p>You can stop using the Service at any time and ask us to close your account at <a href="mailto:hello@carsfindme.com">hello@carsfindme.com</a>. We may suspend or end your access at any time. Sections that by their nature should survive (including 1, 4, 7, 9, 10, 11 and 14) survive termination.</p>
 
 <h2>13. Changes</h2>
 <p>We may update these Terms. If changes are material we'll take reasonable steps to let you know, for example by email or a notice on the site. Continuing to use the Service after changes take effect means you accept them.</p>
@@ -53,7 +53,7 @@ export const TERMS_HTML = `
 <p>These Terms are governed by the laws of the State of Florida, without regard to conflict-of-law rules. Disputes will be resolved in the state or federal courts located in Miami-Dade County, Florida, and you consent to their jurisdiction.</p>
 
 <h2>15. Contact</h2>
-<p>Raul Calderon (CarsFindMe) · 50 SW 19th Rd, Miami, FL 33129 · <a href="mailto:raulfcalderon@gmail.com">raulfcalderon@gmail.com</a></p>
+<p>Raul Calderon (CarsFindMe) · 50 SW 19th Rd, Miami, FL 33129 · <a href="mailto:hello@carsfindme.com">hello@carsfindme.com</a></p>
 `;
 
 export const PRIVACY_HTML = `
@@ -98,7 +98,7 @@ export const PRIVACY_HTML = `
 <p>We keep your information while your account is open and for as long as needed for the purposes above, including resolving disputes and enforcing our Terms. Backups are kept for a limited time and then deleted.</p>
 
 <h2>6. Your choices and rights</h2>
-<p>You can ask to access, correct or delete your personal information, or close your account, by emailing <a href="mailto:raulfcalderon@gmail.com">raulfcalderon@gmail.com</a>. Depending on where you live (for example California or the EU/UK), you may have additional rights; we'll honor them as required by law. We'll never treat you differently for exercising your rights.</p>
+<p>You can ask to access, correct or delete your personal information, or close your account, by emailing <a href="mailto:hello@carsfindme.com">hello@carsfindme.com</a>. Depending on where you live (for example California or the EU/UK), you may have additional rights; we'll honor them as required by law. We'll never treat you differently for exercising your rights.</p>
 
 <h2>7. Security</h2>
 <p>We use reasonable safeguards, including encrypted connections (HTTPS), hashed passwords, and encrypted storage at our hosting provider. No system is perfectly secure, so please use a strong, unique password.</p>
@@ -110,5 +110,5 @@ export const PRIVACY_HTML = `
 <p>We may update this policy. If changes are material we'll let you know, for example by email or a notice on the site.</p>
 
 <h2>10. Contact</h2>
-<p>Raul Calderon (CarsFindMe) · 50 SW 19th Rd, Miami, FL 33129 · <a href="mailto:raulfcalderon@gmail.com">raulfcalderon@gmail.com</a></p>
+<p>Raul Calderon (CarsFindMe) · 50 SW 19th Rd, Miami, FL 33129 · <a href="mailto:hello@carsfindme.com">hello@carsfindme.com</a></p>
 `;

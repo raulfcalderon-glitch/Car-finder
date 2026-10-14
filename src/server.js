@@ -32,6 +32,8 @@ const app = createApp(db, {
   sendEmail: createMailer({
     apiKey: process.env.RESEND_API_KEY,
     from: process.env.EMAIL_FROM ?? 'CarsFindMe <onboarding@resend.dev>',
+    // Where replies to the site's emails go (alerts, confirmations…), unless an email names its own.
+    replyTo: process.env.REPLY_TO ?? 'CarsFindMe <hello@carsfindme.com>',
   }),
 });
 

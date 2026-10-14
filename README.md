@@ -39,6 +39,7 @@ Environment variables:
 - `RESEND_API_KEY` – API key from [Resend](https://resend.com) for email alerts. Without it, emails are printed to the server log instead of sent.
 - `EMAIL_FROM` – sender, e.g. `CarsFindMe <alerts@yourdomain.com>` (default `CarsFindMe <onboarding@resend.dev>`, Resend's test sender, which can only deliver to your own Resend account's email until you verify a domain).
 - `GOOGLE_CLIENT_ID` – OAuth Client ID (Web application) from Google Cloud Console; turns on "Continue with Google" for buyers. Add `https://carsfindme.com` (and `http://localhost:3000` for local testing) under **Authorized JavaScript origins**.
+- `REPLY_TO` – where replies to the site's emails go (default `CarsFindMe <hello@carsfindme.com>`); emails like a dealer's response keep their own reply-to.
 - `APP_URL` – public address used for links in emails (defaults to Render's `RENDER_EXTERNAL_URL`).
 
 ## Backups

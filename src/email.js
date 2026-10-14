@@ -4,8 +4,10 @@
 const esc = (v) =>
   String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-export function createMailer({ apiKey, from, log = console } = {}) {
-  return async function sendEmail({ to, subject, text, html, replyTo, headers }) {
+// `replyTo` is the default reply address (e.g. hello@yourdomain.com); emails that name their own,
+// like a dealer's response, keep theirs.
+export function createMailer({ apiKey, from, replyTo: defaultReplyTo, log = console } = {}) {
+  return async function sendEmail({ to, subject, text, html, replyTo = defaultReplyTo, headers }) {
     if (!apiKey) {
       log.log(`[email not sent: RESEND_API_KEY not set] to=${to} subject="${subject}"\n${text}`);
       return;
