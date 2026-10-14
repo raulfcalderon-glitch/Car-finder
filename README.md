@@ -1,6 +1,6 @@
 # CarsFindMe
 
-A two-sided marketplace for enthusiast cars — 911s, BMW M cars, special editions and exotics. Live at [carsfindme.com](https://carsfindme.com).
+A two-sided marketplace for enthusiast, collector and special-edition cars. Live at [carsfindme.com](https://carsfindme.com).
 
 - **Users** (buyers) post a request for the exact car they want — e.g. a 1987 Porsche 911 Carrera — with year range, budget, condition, color, location and notes.
 - **Dealers** (licensed dealers, and brokers / independent specialists) apply with checkable details — business name, role, phone, address, website, dealer license and state (licensed dealers), track record and references (brokers). An admin works through a checklist (license looked up with the state, website/references checked, publicly listed number called) before they can approve; approved dealers show a **Verified** badge to buyers. They then browse every open request in a searchable, sortable list and respond with what they have and an asking price.
