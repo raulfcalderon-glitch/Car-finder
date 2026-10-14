@@ -1,0 +1,100 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..900;1,62..125,400..900&family=Michroma&family=Unbounded:wght@500;700;800&family=Playfair+Display:ital,wght@1,700;1,800&family=Big+Shoulders+Display:wght@700;800;900&family=Saira:ital,wdth,wght@0,62..125,500..900;1,62..125,500..900&family=Lexend:wght@600;700;800&family=Kanit:ital,wght@1,700;1,800&family=Cormorant+Garamond:wght@600;700&family=Yellowtail&family=Space+Grotesk:wght@600;700&family=Racing+Sans+One&family=Russo+One&family=Bebas+Neue&family=Barlow+Condensed:ital,wght@1,700;1,800&family=Teko:wght@600;700&family=Squada+One&family=Archivo+Black&family=Inter:wght@400..700&display=block">
+<style>
+:root{--ink:#0b0c0e;--paper:#f4f2ee;--red:#e2283f;--deep:#b80d26}
+*{box-sizing:border-box}
+body{margin:0;background:#dedbd4;font-family:Inter,sans-serif;color:#15171a;width:1500px;padding:44px}
+h1{font-family:Archivo;font-stretch:118%;font-weight:800;font-size:42px;margin:0 0 6px;letter-spacing:-.01em}
+.sub{color:#5c6370;margin:0 0 30px;font-size:17px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+.c{background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 1px 0 rgba(0,0,0,.06)}
+.top{display:grid;grid-template-columns:230px 1fr}
+.icon{background:#ece9e3;display:grid;place-items:center;height:250px}
+.icon svg{width:150px;height:150px;filter:drop-shadow(0 10px 18px rgba(0,0,0,.18))}
+.locks{display:grid;grid-template-rows:1fr 1fr}
+.dark{background:var(--ink);color:#f2f1ee;display:flex;align-items:center;justify-content:center;gap:14px;padding:0 20px}
+.light{background:var(--paper);color:#111;display:flex;align-items:center;justify-content:center;gap:12px;padding:0 20px}
+.lock svg{height:46px;width:auto}
+.meta{padding:16px 22px 20px}
+.meta b{font-family:Archivo;font-stretch:112%;font-size:19px}
+.meta p{margin:6px 0 0;color:#5c6370;font-size:14.5px;line-height:1.5}
+.n{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--deep);color:#fff;font-weight:700;font-size:13px;margin-right:9px;vertical-align:2px}
+</style></head><body>
+<h1>CarsFindMe — round 4: for enthusiasts</h1>
+<p class="sub">Details that car people recognize instantly. Each shown as an app icon and as the full logo on dark and light.</p>
+<div class="grid" id="g"></div>
+<script>
+const R='#e2283f', D='#b80d26', GOLD='#c9a86a', AL1='#f3f2ef', AL2='#9a9ea6';
+const inv = (fg) => fg === '#111' ? '#f4f2ee' : '#0b0c0e';
+const tile = (id, a, b) => `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="100" height="100" rx="24" fill="url(#${id})"/>`;
+const pol = (cx, cy, r, deg) => [cx + r * Math.cos(deg * Math.PI / 180), cy + r * Math.sin(deg * Math.PI / 180)];
+const C = [];
+
+// 1 — Monza fuel cap
+const monza = (id) => `<defs><linearGradient id="al${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${AL1}"/><stop offset=".55" stop-color="#c3c6cc"/><stop offset="1" stop-color="${AL2}"/></linearGradient><radialGradient id="lid${id}" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#a7abb2"/></radialGradient></defs>
+<circle cx="50" cy="52" r="38" fill="url(#al${id})" stroke="#5e636b" stroke-width="1.5"/>
+${Array.from({length:8},(_,k)=>{const [x,y]=pol(50,52,33,k*45+22.5);return `<circle cx="${x}" cy="${y}" r="2.3" fill="#6b7078"/><circle cx="${x-.6}" cy="${y-.6}" r="1" fill="#e9eaec"/>`}).join('')}
+<rect x="42" y="16" width="16" height="9" rx="2.5" fill="#7d828a"/><circle cx="50" cy="52" r="26" fill="url(#lid${id})" stroke="#6b7078" stroke-width="2"/>
+<circle cx="50" cy="52" r="20" fill="none" stroke="#8f949b" stroke-width="1"/>
+<path d="M43 80 h14 l-2 8 h-10 z" fill="${R}"/>
+<text x="50" y="60" text-anchor="middle" font-family="Russo One" font-size="21" fill="#2a2d33">CF</text>`;
+C.push({t:'Monza Cap', d:'The flip-top aluminum racing fuel filler from classic sports and race cars, bolted ring and all, with "CF" on the lid and a red latch. Pure garage-jewelry.',
+icon:`<svg viewBox="0 0 100 100">${tile('t1','#1c1e22','#060607')}<g transform="translate(50 50) scale(.9) translate(-50 -52)">${monza('i')}</g></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 60"><g transform="translate(-4 -4) scale(.62)">${monza('l'+fg.length)}</g>
+<text x="66" y="42" font-family="Russo One" font-size="29" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+// 2 — Shift knob
+const knob = (id, leather, line) => `<defs><radialGradient id="kn${id}" cx=".38" cy=".32" r=".8"><stop offset="0" stop-color="${leather==='#0b0c0e'?'#3a3d43':'#ffffff'}"/><stop offset="1" stop-color="${leather}"/></radialGradient></defs>
+<circle cx="50" cy="50" r="38" fill="url(#kn${id})"/><circle cx="50" cy="50" r="33" fill="none" stroke="${R}" stroke-width="1.6" stroke-dasharray="3 2.4"/>
+<g stroke="${line}" stroke-width="3.2" stroke-linecap="round" fill="none"><path d="M34 34 V66 M50 34 V66 M66 34 V66 M34 50 H66"/></g>
+<g font-family="Teko" font-weight="700" font-size="11" fill="${line}" text-anchor="middle"><text x="34" y="30">1</text><text x="34" y="78">2</text><text x="50" y="30">3</text><text x="50" y="78">4</text><text x="66" y="30">5</text></g>
+<circle cx="66" cy="70.5" r="6.5" fill="${R}"/><text x="66" y="74.5" text-anchor="middle" font-family="Teko" font-weight="700" font-size="11" fill="#fff">6</text>`;
+C.push({t:'Six-Speed', d:'The top of a leather shift knob with red stitching and an engraved six-speed pattern, sixth gear lit in red. A love letter to the "save the manuals" crowd.',
+icon:`<svg viewBox="0 0 100 100">${tile('t2','#f0354b','#9e0a1f')}${knob('i','#0b0c0e','#f4f2ee')}</svg>`,
+lock:(fg)=>`<svg viewBox="0 0 420 60"><g transform="translate(-2 0) scale(.6)">${knob('l'+fg.length, fg==='#111'?'#0b0c0e':'#f4f2ee', fg==='#111'?'#f4f2ee':'#0b0c0e')}</g>
+<text x="68" y="45" font-family="Teko" font-weight="700" font-size="44" letter-spacing="1" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+// 3 — Rally lights
+const lamp = (cx, cy, r, cover) => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#c9ccd2"/><circle cx="${cx}" cy="${cy}" r="${r-3}" fill="${cover}"/><path d="M${cx-(r-6)} ${cy-(r-6)} L${cx+(r-6)} ${cy+(r-6)} M${cx+(r-6)} ${cy-(r-6)} L${cx-(r-6)} ${cy+(r-6)}" stroke="#f4f2ee" stroke-width="${r/4.5}" stroke-linecap="round"/>`;
+C.push({t:'Rally Lamps', d:'Twin rally spotlights with taped-X covers, the signature of classic Safari and stage-rally cars. Adventurous and instantly "car person", with one lamp in brand red.',
+icon:`<svg viewBox="0 0 100 100">${tile('t3','#1c1e22','#060607')}<rect x="12" y="66" width="76" height="6" rx="3" fill="#6b7078"/>${lamp(31,48,19,'#0b0c0e')}${lamp(69,48,19,R)}</svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 60"><rect x="2" y="44" width="58" height="4" rx="2" fill="${fg==='#111'?'#6b7078':'#8d9097'}"/>${lamp(16,28,14,'#0b0c0e')}${lamp(46,28,14,R)}
+<text x="76" y="43" font-family="Barlow Condensed" font-style="italic" font-weight="800" font-size="36" letter-spacing=".5" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+// 4 — Ducktail
+C.push({t:'Ducktail', d:'A single line that runs flat, then kicks up at the end like a classic ducktail spoiler, with a red taillight bar. Underlines the name like a signature; subtle but every enthusiast gets it.',
+icon:`<svg viewBox="0 0 100 100">${tile('t4','#f4f2ee','#ddd8cf')}<path d="M10 70 C 34 70, 52 69, 66 62 C 74 58, 78 50, 80 40 L 90 37 L 90 44 C 88 56, 82 66, 70 72 C 58 78, 30 78, 10 78 Z" fill="#0b0c0e"/><rect x="72" y="62" width="17" height="6" rx="3" fill="${R}" transform="rotate(-24 80 65)"/><text x="12" y="52" font-family="Archivo Black" font-size="30" letter-spacing="-1" fill="#0b0c0e">CF</text></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 64"><text x="2" y="38" font-family="Archivo Black" font-size="31" letter-spacing="-.8" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text><path d="M2 48 C 120 48, 230 48, 262 44 C 276 42, 284 36, 288 26 L 298 24 C 296 38, 286 50, 266 54 C 240 58, 120 58, 2 58 Z" fill="${fg}"/><rect x="282" y="42" width="14" height="5" rx="2.5" fill="${R}" transform="rotate(-30 289 44)"/></svg>`});
+
+// 5 — Tow strap
+C.push({t:'Tow Strap', d:'The bright red tow loop bolted to every track car, printed with "TOW", here reading "FIND". A cheeky motorsport detail that\'s bold at any size.',
+icon:`<svg viewBox="0 0 100 100">${tile('t5','#1c1e22','#060607')}<path d="M50 14 L84 76 H16 Z" fill="none" stroke="${R}" stroke-width="15" stroke-linejoin="round"/><g stroke="#f4f2ee" stroke-width="1" stroke-dasharray="2 2" opacity=".7" fill="none"><path d="M50 26 L74 70 H26 Z"/></g><text x="50" y="80" text-anchor="middle" font-family="Squada One" font-size="13" letter-spacing="2" fill="#f4f2ee">FIND</text><rect x="42" y="6" width="16" height="12" rx="3" fill="#9a9ea6"/><circle cx="50" cy="12" r="3" fill="#2a2d33"/></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 60"><path d="M26 8 L48 50 H4 Z" fill="none" stroke="${R}" stroke-width="9" stroke-linejoin="round"/><text x="26" y="53" text-anchor="middle" font-family="Squada One" font-size="8" letter-spacing="1" fill="#f4f2ee">FIND</text><rect x="21" y="2" width="10" height="8" rx="2" fill="#9a9ea6"/>
+<text x="64" y="44" font-family="Squada One" font-size="40" letter-spacing="1" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+// 6 — Mesh wheel
+const mesh = (id, rim, spoke, cap) => { let s=`<circle cx="50" cy="50" r="40" fill="${rim}"/><circle cx="50" cy="50" r="34" fill="#16181c"/>`; for (let k=0;k<12;k++){ const a=k*30; const [x1,y1]=pol(50,50,12,a), [x2,y2]=pol(50,50,33,a+22), [x3,y3]=pol(50,50,33,a-22); s+=`<path d="M${x1} ${y1} L${x2} ${y2} M${x1} ${y1} L${x3} ${y3}" stroke="${spoke}" stroke-width="2.2" stroke-linecap="round"/>`;} for (let k=0;k<12;k++){const [x,y]=pol(50,50,36.8,k*30+15); s+=`<circle cx="${x}" cy="${y}" r="1.2" fill="#2a2d33"/>`;} return s+`<circle cx="50" cy="50" r="13" fill="${cap}"/><text x="50" y="55" text-anchor="middle" font-family="Russo One" font-size="11" fill="#f4f2ee">CF</text>`; };
+C.push({t:'Mesh Wheel', d:'A gold cross-spoke mesh wheel, the period-correct look of \'80s–\'90s Group A, DTM and JDM cars, with a red "CF" center cap. Rich in nostalgia for modern-classic fans.',
+icon:`<svg viewBox="0 0 100 100">${tile('t6','#f0354b','#9e0a1f')}<g transform="translate(50 50) scale(.92) translate(-50 -50)">${mesh('i',GOLD,GOLD,'#0b0c0e')}</g></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 60"><g transform="translate(-6 -6) scale(.66)">${mesh('l',GOLD,GOLD,R)}</g>
+<text x="68" y="43" font-family="Archivo" font-style="italic" font-stretch="125%" font-weight="900" font-size="30" letter-spacing="-.5" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+// 7 — Turbo
+const turbo = (body, wheel, accent) => { let s=`<path d="M50 14 A 36 36 0 1 1 14 50 L 14 30 C 14 20, 22 14, 32 14 Z" fill="${body}"/><circle cx="50" cy="50" r="22" fill="${wheel}"/>`; for (let k=0;k<9;k++){ const a=k*40; const [x1,y1]=pol(50,50,6,a), [xc,yc]=pol(50,50,15,a+28), [x2,y2]=pol(50,50,21,a+52); s+=`<path d="M${x1} ${y1} Q ${xc} ${yc} ${x2} ${y2}" stroke="${body}" stroke-width="2.6" fill="none" stroke-linecap="round"/>`;} return s+`<circle cx="50" cy="50" r="5" fill="${accent}"/><path d="M14 30 L 14 14 L 30 14" stroke="${accent}" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`; };
+C.push({t:'Boost', d:'A turbocharger seen head-on: the snail housing and spinning compressor wheel, with a red outlet. For the tuner and boost crowd, and it reads as "spinning up" and "power".',
+icon:`<svg viewBox="0 0 100 100">${tile('t7','#1c1e22','#060607')}<g transform="translate(50 52) scale(.9) translate(-50 -50)">${turbo('#c3c6cc','#2a2d33',R)}</g></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 60"><g transform="translate(-4 -2) scale(.6)">${turbo(fg==='#111'?'#2a2d33':'#c3c6cc', fg==='#111'?'#c3c6cc':'#2a2d33', R)}</g>
+<text x="64" y="43" font-family="Racing Sans One" font-size="33" fill="${fg}">Cars<tspan fill="${R}">Find</tspan>Me</text></svg>`});
+
+// 8 — Three pedals
+const pedal = (x, y, w, h, col) => { let s=`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="${col}"/>`; for (let i=0;i<Math.floor(h/7);i++) for (let j=0;j<Math.floor(w/7);j++) s+=`<circle cx="${x+5+j*7}" cy="${y+5+i*7}" r="1.6" fill="#0b0c0e" opacity=".55"/>`; return s; };
+C.push({t:'Three Pedals', d:'Clutch, brake and gas in drilled aluminum, with the throttle in red. "Three pedals" is shorthand for driving enthusiasts everywhere: a quiet nod only they will get.',
+icon:`<svg viewBox="0 0 100 100">${tile('t8','#f4f2ee','#ddd8cf')}${pedal(14,38,24,26,'#9a9ea6')}${pedal(42,36,24,28,'#9a9ea6')}${pedal(71,22,15,46,R)}<rect x="10" y="76" width="80" height="5" rx="2.5" fill="#0b0c0e"/></svg>`,
+lock:(fg)=>`<svg viewBox="0 0 440 60"><g transform="translate(-6 -14) scale(.68)">${pedal(14,38,24,26,'#9a9ea6')}${pedal(42,36,24,28,'#9a9ea6')}${pedal(71,22,15,46,R)}</g>
+<text x="70" y="43" font-family="Bebas Neue" font-size="42" letter-spacing="2.5" fill="${fg}">CARS<tspan fill="${R}">FIND</tspan>ME</text></svg>`});
+
+document.getElementById('g').innerHTML = C.map((m,i)=>`
+<div class="c"><div class="top"><div class="icon">${m.icon}</div>
+<div class="locks"><div class="dark lock">${m.lock('#f2f1ee')}</div><div class="light lock">${m.lock('#111')}</div></div></div>
+<div class="meta"><b><span class="n">${i+1}</span>${m.t}</b><p>${m.d}</p></div></div>`).join('');
+</script></body></html>
