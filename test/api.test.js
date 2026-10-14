@@ -1210,7 +1210,7 @@ test('link previews: the share image and tags are served', async () => {
   assert.equal(image.status, 200);
   assert.equal(image.headers.get('content-type'), 'image/png');
   const html = await (await fetch(`${base}/`)).text();
-  assert.match(html, /<meta property="og:image" content="https:\/\/carsfindme.com\/og-image.png\?v=2">/);
+  assert.match(html, /<meta property="og:image" content="https:\/\/carsfindme.com\/og-image.png\?v=3">/);
   assert.match(html, /twitter:card" content="summary_large_image"/);
 });
 
