@@ -295,6 +295,18 @@ const esc = (v) =>
   String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const MAX_GALLERY = 8;
+const MAX_REQUEST_PHOTOS = 4;
+
+// Public Wanted list: budgets are shown as a range, never the exact number.
+const BUDGET_RANGES = [25_000, 50_000, 100_000, 250_000, 500_000, 1_000_000];
+function budgetRange(n) {
+  if (n == null) return null;
+  const k = (v) => (v >= 1_000_000 ? `$${v / 1_000_000}M` : `$${v / 1000}k`);
+  const upper = BUDGET_RANGES.findIndex((b) => n < b);
+  if (upper === 0) return `Under ${k(BUDGET_RANGES[0])}`;
+  if (upper === -1) return `${k(BUDGET_RANGES.at(-1))}+`;
+  return `${k(BUDGET_RANGES[upper - 1])}–${k(BUDGET_RANGES[upper])}`;
+}
 
 // Admin-only sample dealers (see POST /api/admin/demo-dealers). Never shown to the public.
 const DEMO_DEALERS = [
@@ -360,6 +372,15 @@ const US_STATE_CODES = {
   Vermont: 'VT', Virginia: 'VA', Washington: 'WA', 'West Virginia': 'WV', Wisconsin: 'WI', Wyoming: 'WY',
 };
 const STATE_CODES = new Set(Object.values(US_STATE_CODES));
+
+// State from a free-text location like "Miami, FL" or "Austin, Texas" (null when it can't tell).
+// The Wanted list shows only this, never the city.
+function requestRegion(location) {
+  const tail = /,\s*([A-Za-z .]+?)\s*$/.exec(location ?? '')?.[1] ?? (location ?? '').trim();
+  if (STATE_CODES.has(tail.toUpperCase())) return tail.toUpperCase();
+  const byName = Object.entries(US_STATE_CODES).find(([name]) => name.toLowerCase() === tail.toLowerCase());
+  return byName ? byName[1] : null;
+}
 
 // Two-letter state for the directory filter: from the profile's "City, ST", else the license state.
 function dealerState(d) {
@@ -785,6 +806,16 @@ export function createApp(
     insertResponse: db.prepare('INSERT INTO responses (request_id, dealer_id, message, price) VALUES (?, ?, ?, ?)'),
     insertPhoto: db.prepare('INSERT INTO response_photos (response_id, filename) VALUES (?, ?)'),
     photosForResponse: db.prepare('SELECT filename FROM response_photos WHERE response_id = ? ORDER BY id'),
+    requestPhotos: db.prepare('SELECT * FROM request_photos WHERE request_id = ? ORDER BY id'),
+    requestPhotoCount: db.prepare('SELECT COUNT(*) AS n FROM request_photos WHERE request_id = ?'),
+    insertRequestPhoto: db.prepare('INSERT INTO request_photos (request_id, filename) VALUES (?, ?)'),
+    requestPhotoById: db.prepare('SELECT * FROM request_photos WHERE id = ? AND request_id = ?'),
+    deleteRequestPhoto: db.prepare('DELETE FROM request_photos WHERE id = ?'),
+    // Public Wanted list: open requests dealers can see, newest first. Never who posted them.
+    publicRequests: db.prepare(`
+      SELECT r.*, (SELECT COUNT(*) FROM visible_responses x WHERE x.request_id = r.id) AS response_count
+      FROM visible_requests r WHERE r.status = 'open'
+      ORDER BY r.created_at DESC, r.id DESC`),
     photosForRequest: db.prepare(`
       SELECT p.filename FROM response_photos p JOIN responses x ON x.id = p.response_id WHERE x.request_id = ?`),
     responseById: db.prepare(`
@@ -862,6 +893,24 @@ export function createApp(
   }
 
   const withPhotos = (r) => serializeResponse(r, q.photosForResponse.all(r.id).map((p) => p.filename));
+  const requestPhotoList = (id) => q.requestPhotos.all(id).map((p) => ({ id: p.id, url: photoUrl(p.filename) }));
+  const withRequestPhotos = (payload) => ({ ...payload, photos: requestPhotoList(payload.id) });
+
+  // The buyer who posted it, or an admin, can change a request's photos.
+  function requireRequestEditor(req, id) {
+    const account = requireAccount(req);
+    const request = loadRequest(id);
+    if (request.user_id !== account.id && !isAdmin(account)) throw new HttpError(403, 'You can only change your own requests');
+    return request;
+  }
+
+  async function addRequestPhotos(requestId, photos) {
+    if (photos.length && !uploadsDir) throw new HttpError(400, 'Photo uploads are not available');
+    if (q.requestPhotoCount.get(requestId).n + photos.length > MAX_REQUEST_PHOTOS) {
+      throw new HttpError(400, `You can add up to ${MAX_REQUEST_PHOTOS} photos to a request`);
+    }
+    for (const photo of photos) q.insertRequestPhoto.run(requestId, await storeImage(photo));
+  }
 
   async function savePhotos(responseId, photos) {
     if (!photos.length) return [];
@@ -1260,7 +1309,7 @@ export function createApp(
         LIMIT :limit OFFSET :offset`)
       .all({ ...args, limit, offset });
 
-    return { total, limit, offset, sort: sortKey, requests: rows.map(serializeRequest) };
+    return { total, limit, offset, sort: sortKey, requests: rows.map((r) => withRequestPhotos(serializeRequest(r))) };
   }
 
   const routes = [
@@ -1512,16 +1561,77 @@ export function createApp(
     ['POST', /^\/api\/requests$/, async (req, res) => {
       const account = requireAccount(req, 'user');
       requireVerified(account);
-      const fields = parseRequestFields(await readJson(req));
+      const body = await readJson(req, MAX_PHOTO_BODY_BYTES);
+      const fields = parseRequestFields(body);
+      const photos = decodePhotos(body.photos);
+      if (photos.length > MAX_REQUEST_PHOTOS) throw new HttpError(400, `You can add up to ${MAX_REQUEST_PHOTOS} photos to a request`);
       const { lastInsertRowid } = q.insertRequest.run({ ...fields, user_id: account.id });
+      await addRequestPhotos(lastInsertRowid, photos);
       const request = loadRequest(lastInsertRowid);
-      sendJson(res, 201, { request: serializeRequest(request) });
+      sendJson(res, 201, { request: withRequestPhotos(serializeRequest(request)) });
       alertDealers(request);
+    }],
+
+    // Reference photos on a request: the buyer (or an admin) adds or removes them one at a time.
+    ['POST', /^\/api\/requests\/(\d+)\/photos$/, async (req, res, [id]) => {
+      const request = requireRequestEditor(req, Number(id));
+      const [photo] = decodePhotos([(await readJson(req, 8 * 1024 * 1024)).photo]);
+      await addRequestPhotos(request.id, [photo]);
+      sendJson(res, 201, { photos: requestPhotoList(request.id) });
+    }],
+
+    ['DELETE', /^\/api\/requests\/(\d+)\/photos\/(\d+)$/, async (req, res, [id, photoId]) => {
+      const request = requireRequestEditor(req, Number(id));
+      const photo = q.requestPhotoById.get(Number(photoId), request.id);
+      if (!photo) throw new HttpError(404, 'Photo not found');
+      q.deleteRequestPhoto.run(photo.id);
+      await removePhotoFiles([photo.filename]);
+      sendJson(res, 200, { photos: requestPhotoList(request.id) });
+    }],
+
+    // Public Wanted list: anyone can browse what buyers are looking for, but never who they are,
+    // their notes, exact budget or exact location, and there's no way to contact them from here.
+    ['GET', /^\/api\/public\/requests$/, async (req, res, _m, url) => {
+      const params = url.searchParams;
+      const make = (params.get('make') ?? '').trim().toLowerCase();
+      const words = (params.get('q') ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+      const limit = int(params.get('limit'), 'limit', { min: 1, max: 100 }) ?? 30;
+      const offset = int(params.get('offset'), 'offset', { min: 0 }) ?? 0;
+      const all = q.publicRequests.all();
+      const makes = [...new Set(all.map((r) => r.make))].sort((a, b) => a.localeCompare(b));
+      const matches = all.filter((r) => {
+        if (make && r.make.toLowerCase() !== make) return false;
+        const text = [r.make, r.model, r.trim, r.color, r.year_min, r.year_max].join(' ').toLowerCase();
+        return words.every((w) => text.includes(w) || text.includes(standardMake(w).toLowerCase()));
+      });
+      // A shared link puts that request first, so it shows even if it's not on the first page.
+      const first = Number(params.get('first'));
+      if (first) matches.sort((a, b) => (b.id === first) - (a.id === first));
+      sendJson(res, 200, {
+        total: all.length,
+        count: matches.length,
+        makes,
+        requests: matches.slice(offset, offset + limit).map((r) => ({
+          id: r.id,
+          make: r.make,
+          model: r.model,
+          trim: r.trim,
+          yearMin: r.year_min,
+          yearMax: r.year_max,
+          condition: r.condition,
+          color: r.color,
+          budget: budgetRange(r.max_budget),
+          region: requestRegion(r.location),
+          responseCount: r.response_count,
+          createdAt: r.created_at,
+          photos: requestPhotoList(r.id).map((p) => p.url),
+        })),
+      });
     }],
 
     ['GET', /^\/api\/my\/requests$/, async (req, res) => {
       const account = requireAccount(req, 'user');
-      sendJson(res, 200, { requests: q.requestsByUser.all(account.id).map(serializeRequest) });
+      sendJson(res, 200, { requests: q.requestsByUser.all(account.id).map((r) => withRequestPhotos(serializeRequest(r))) });
     }],
 
     ['PATCH', /^\/api\/requests\/(\d+)$/, async (req, res, [id]) => {
@@ -1980,7 +2090,10 @@ export function createApp(
     ['DELETE', /^\/api\/admin\/requests\/(\d+)$/, async (req, res, [id]) => {
       requireAdmin(req);
       const request = loadRequest(Number(id));
-      const files = q.photosForRequest.all(request.id).map((p) => p.filename);
+      const files = [
+        ...q.photosForRequest.all(request.id).map((p) => p.filename),
+        ...q.requestPhotos.all(request.id).map((p) => p.filename),
+      ];
       q.deleteRequest.run(request.id);
       await removePhotoFiles(files);
       sendJson(res, 200, { ok: true, deletedId: request.id });
@@ -2015,7 +2128,7 @@ export function createApp(
       } else {
         throw new HttpError(404, 'Request not found');
       }
-      const payload = viewer === 'admin' ? adminRequestPayload(request) : serializeRequest(request);
+      const payload = withRequestPhotos(viewer === 'admin' ? adminRequestPayload(request) : serializeRequest(request));
       sendJson(res, 200, { viewer, request: payload, responses });
     }],
   ];

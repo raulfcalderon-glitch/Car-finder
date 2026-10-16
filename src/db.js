@@ -146,6 +146,16 @@ const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_dealer_reports_dealer ON dealer_reports(dealer_id, status);
 
+  -- Reference photos a buyer adds to a request ("this exact spec"). Shown publicly in the Wanted list.
+  CREATE TABLE IF NOT EXISTS request_photos (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    filename   TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_request_photos_request ON request_photos(request_id);
+
   -- Showroom / past-sales photos on a dealer's public profile.
   CREATE TABLE IF NOT EXISTS dealer_photos (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

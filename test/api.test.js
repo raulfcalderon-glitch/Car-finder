@@ -1418,3 +1418,57 @@ test('the dealer directory can be switched off', async () => {
   off.close();
   assert.equal(res.status, 404);
 });
+
+test('buyers can add reference photos to a request', async () => {
+  const buyer = await signup('user');
+  const other = await signup('user');
+  const created = await buyer('POST', '/api/requests', { make: 'Porsche', model: 'Photo 964 RS', photos: [PNG, PNG] });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const { request } = created.body;
+  assert.equal(request.photos.length, 2);
+  assert.equal((await buyer('POST', '/api/requests', { make: 'BMW', model: 'Too many', photos: [PNG, PNG, PNG, PNG, PNG] })).status, 400);
+
+  // Add and remove one at a time; only the owner (or an admin) can.
+  assert.equal((await other('POST', `/api/requests/${request.id}/photos`, { photo: PNG })).status, 403);
+  const added = await buyer('POST', `/api/requests/${request.id}/photos`, { photo: PNG });
+  assert.equal(added.body.photos.length, 3);
+  await buyer('POST', `/api/requests/${request.id}/photos`, { photo: PNG });
+  assert.equal((await buyer('POST', `/api/requests/${request.id}/photos`, { photo: PNG })).status, 400, 'max 4');
+  const removed = await buyer('DELETE', `/api/requests/${request.id}/photos/${added.body.photos[0].id}`);
+  assert.equal(removed.body.photos.length, 3);
+  assert.equal((await (await admin())('DELETE', `/api/requests/${request.id}/photos/${added.body.photos[1].id}`)).status, 200);
+
+  // Dealers see them on the request.
+  const dealer = await signup('dealer');
+  assert.equal((await dealer('GET', `/api/requests/${request.id}`)).body.request.photos.length, 2);
+  const photo = await fetch(base + (await dealer('GET', `/api/requests/${request.id}`)).body.request.photos[0].url);
+  assert.equal(photo.status, 200);
+});
+
+test('anyone can browse the Wanted list, without who posted or how to reach them', async () => {
+  const buyer = await signup('user', { name: 'Private Person' });
+  const { request } = (await buyer('POST', '/api/requests', {
+    make: 'Ferrari', model: 'Wanted F355', trim: 'Berlinetta', yearMin: 1995, yearMax: 1999, maxBudget: 120000,
+    location: 'Coral Gables, FL', notes: 'Call me at 305-555-0199', color: 'Rosso Corsa', photos: [PNG],
+  })).body;
+  const anon = client();
+  const list = await anon('GET', '/api/public/requests?q=f355');
+  assert.equal(list.status, 200);
+  const item = list.body.requests.find((r) => r.id === request.id);
+  assert.ok(item, 'listed');
+  assert.equal(item.budget, '$100k–$250k');
+  assert.equal(item.region, 'FL');
+  assert.equal(item.photos.length, 1);
+  const json = JSON.stringify(list.body);
+  for (const secret of ['Private', '305-555-0199', 'Coral Gables', '120000', buyer.account.email]) assert.ok(!json.includes(secret), secret);
+
+  // Visitors still can't open the request itself.
+  assert.equal((await anon('GET', `/api/requests/${request.id}`)).status, 401);
+  // Filters, and a shared link puts its request first.
+  assert.ok((await anon('GET', '/api/public/requests?make=ferrari')).body.requests.every((r) => r.make === 'Ferrari'));
+  assert.equal((await anon('GET', `/api/public/requests?first=${request.id}&limit=1`)).body.requests[0].id, request.id);
+
+  // Hidden and closed requests drop out.
+  await (await admin())('PATCH', `/api/admin/requests/${request.id}`, { hidden: true });
+  assert.ok(!(await anon('GET', '/api/public/requests?q=f355')).body.requests.some((r) => r.id === request.id));
+});

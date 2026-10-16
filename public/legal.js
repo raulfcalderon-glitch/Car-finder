@@ -29,7 +29,7 @@ export const TERMS_HTML = `
 <p>We may, at our discretion and without notice, edit, hide or remove any request or response, and freeze, suspend or close any account — for example to enforce these Terms, protect users, or keep the Service focused on specialty vehicles.</p>
 
 <h2>7. Your content</h2>
-<p>You keep ownership of what you post. You give us a non-exclusive, worldwide, royalty-free license to host, display and share it as needed to run and promote the Service. You're responsible for what you post.</p>
+<p>Only upload photos you took or have the right to share, and avoid photos that show people or license plates. Reference photos on requests are shown publicly. You keep ownership of what you post. You give us a non-exclusive, worldwide, royalty-free license to host, display and share it as needed to run and promote the Service. You're responsible for what you post.</p>
 
 <h2>8. Fees</h2>
 <p>The Service is currently free. If we introduce fees, we'll tell you before they apply to you.</p>
@@ -65,7 +65,7 @@ export const PRIVACY_HTML = `
   <li><strong>Account details:</strong> your name, email address and password (stored only as a secure hash). Dealers also provide application details we use to verify them (business name, role, phone number, business address, website, dealer license number and state, or a broker's track record and references).</li>
   <li><strong>Dealer profiles:</strong> what dealers choose to add to their public profile: logo, cover and gallery photos, description, specialties, city, year founded and Instagram handle.</li>
   <li><strong>If you continue with Google:</strong> Google shares your name, email address and a Google account ID with us. We use them only to create your account and sign you in. We don't get your Google password or access to anything else in your Google account.</li>
-  <li><strong>What you post:</strong> vehicle requests (make, model, years, budget, condition, color, location, notes) and dealer responses (messages and prices).</li>
+  <li><strong>What you post:</strong> vehicle requests (make, model, years, budget, condition, color, location, notes and any reference photos you add) and dealer responses (messages, prices and photos).</li>
   <li><strong>Technical information:</strong> your IP address and basic request details, used to keep the Service secure (for example, to block repeated password guessing), and the date you last signed in.</li>
   <li><strong>Cookies:</strong> one essential cookie that keeps you signed in. We don't use advertising or tracking cookies.</li>
 </ul>
@@ -83,7 +83,7 @@ export const PRIVACY_HTML = `
   <li><strong>Buyers</strong> who receive a response see that dealer's business name, contact name, email address and phone number, so they can follow up.</li>
   <li>Dealers don't see other dealers' responses.</li>
   <li><strong>Dealer profiles are public:</strong> anyone, including people without an account, can see an approved dealer's profile: business name, logo, cover and gallery photos, description, specialties, city, year founded, website, Instagram, what CarsFindMe checked, when they joined and how many requests they've answered. Profiles never show a dealer's email address, phone number, license number, street address or the contact person's name. If a profile is shared on social media, that platform may show its name, description and cover photo in a link preview.</li>
-  <li><strong>Anyone visiting our homepage</strong> may see the year, make, model and trim of recent open requests (for example, "1987 Porsche 911 Carrera"). We never show your name, location, budget, notes or contact details there.</li>
+  <li><strong>Anyone, including visitors without an account,</strong> can see open requests in our public Wanted list and homepage: the year, make, model, trim, condition and color you asked for, your budget as a range (for example "$50k–$100k"), your state, the reference photos you added, when you posted and how many dealers responded. We never show your name, profile photo, contact details, exact budget, city or notes there, and visitors can't contact you through it.</li>
 </ul>
 
 <h2>4. Who we share it with</h2>

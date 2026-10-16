@@ -16,6 +16,8 @@ A two-sided marketplace for enthusiast, collector and special-edition cars. Live
 - **Reports:** buyers can report a dealer's response (deposit/wire request, misleading, conduct, spam, other) once per response; admins get an email and a **Reports** tab to review and resolve, and each dealer's page lists its reports.
 - **Homepage:** animated hero, example request cards, a live ticker of recent requests, scroll-in sections, and a quick-start box ("What are you hunting for?") that pre-fills the request form (through signup for visitors). Motion is turned off for reduced-motion users. A **Contact us** page sends messages to admins.
 - **Makes & models:** `public/vehicles.js` is a shared catalog (~140 enthusiast makes with nicknames like VW, Chevy, Merc; model suggestions for ~45 makes). The request form autocompletes make and model and asks "Did you mean Porsche?" for likely typos; the server saves known makes under one standard spelling (and fixes older requests at startup), and dealer search, filters and alerts use the standard names.
+- **Public Wanted list (`#/wanted`):** anyone, signed in or not, can browse every open request: vehicle, condition, color, budget as a range, the buyer's state, reference photos, age and response count. Never the buyer's name, contact details, city, exact budget or notes, and visitors can't open a request. Approved dealers click through to respond; everyone else gets "Become a dealer" / "Post a request" and a **Share** button (handy for sending a request to a local dealer). Shared links (`#/wanted?r=ID`) highlight that request.
+- **Request photos:** buyers can add up to 4 reference photos of the car they want when posting, and add or remove them later on the request page (admins can remove them too). Shown to dealers and in the public Wanted list.
 - **Request expiry:** requests close by themselves after 60 days so dealers only see buyers who are still looking. A week before, the buyer gets a "Still looking?" email with a one-click **keep it open** link (no login needed); when it closes they get a reopen link. Reopening gives a fresh 60 days. The check runs at startup and hourly.
 - **Buyer feedback:** buyers mark each response **Interested** (the dealer is emailed; the buyer's contact details are not shared) or **Not for me** with an optional reason (price, spec, condition, found one elsewhere). Dealers see the reaction on the request and on their **My responses** page.
 - **Dealer edits:** dealers can edit a response's price or message while the request is open (buyers see "edited"), or **withdraw** it if the car sold (buyers see it marked withdrawn; it no longer counts).
@@ -72,6 +74,9 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 | GET | `/api/config` | anyone | Public settings for the browser (`googleClientId`) |
 | POST | `/api/auth/google` | anyone | Buyer sign-in/sign-up with a Google ID token (`credential`); returns `needsTerms` for new accounts until `acceptTerms: true` |
 | POST | `/api/contact` | anyone | Contact form: `name`, `email`, `topic`, `message`; stored in `contact_messages` and emailed to admins (honeypot + 5/hour per address) |
+| GET | `/api/public/requests` | anyone | Wanted list: `q`, `make`, `limit`, `offset`, `first` (an id to list first). Vehicle basics, budget range, state, photos, response count; never who posted |
+| POST | `/api/requests/:id/photos` | owning buyer or admin | Add a reference photo (`photo` data URL), up to 4 per request |
+| DELETE | `/api/requests/:id/photos/:photoId` | owning buyer or admin | Remove a reference photo |
 | GET | `/api/public/recent-requests` | anyone | Homepage ticker: year, make, model and trim of the 10 latest open, visible requests (nothing else) |
 | PUT | `/api/me/alerts` | dealer | Alert settings: `mode` (`all`, `makes`, `off`), `makes` (list or comma-separated), `minBudget` |
 | PUT / DELETE | `/api/me/avatar` | signed in | Set (`photo` as an image data URL) or remove your profile picture |
@@ -81,7 +86,7 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 | POST | `/api/password/forgot` | anyone | Email a reset link (same response whether or not the account exists) |
 | POST | `/api/password/reset` | anyone | Set a new `password` with the emailed `token`; signs out other sessions |
 | GET | `/api/admin/backup` | admin | Download the whole database as a SQLite file |
-| POST | `/api/requests` | user | Post a vehicle request |
+| POST | `/api/requests` | user | Post a vehicle request (optional `photos`: up to 4 image data URLs) |
 | GET | `/api/my/requests` | user | Your requests with response counts |
 | PATCH | `/api/requests/:id` | owning user | Edit fields or set `status` (`open`, `fulfilled`, `closed`) |
 | GET | `/api/requests` | approved dealer | Search open requests (see below) |

@@ -130,7 +130,7 @@ function navItems() {
       ? me.status === 'active'
         ? [['#/browse', 'Requests'], ['#/responses', 'My responses']]
         : []
-      : [['#/my', 'My requests'], ['#/new', 'New request'], ...(FEATURES.dealerDirectory ? [['#/dealers', 'Dealers']] : [])];
+      : [['#/my', 'My requests'], ['#/new', 'New request'], ['#/wanted', 'Wanted'], ...(FEATURES.dealerDirectory ? [['#/dealers', 'Dealers']] : [])];
   if (me.isAdmin) items.push(['#/admin', 'Admin']);
   return items;
 }
@@ -139,7 +139,7 @@ const chevron = '<svg class="chevron" viewBox="0 0 20 20" aria-hidden="true"><pa
 
 function renderNav() {
   if (!me) {
-    nav.innerHTML = `${FEATURES.dealerDirectory ? '<a class="nav-login nav-dealers" href="#/dealers">Dealers</a>' : ''}<a class="nav-login" href="#/login">Log in</a><a class="button" href="#/signup">Sign up</a>`;
+    nav.innerHTML = `<a class="nav-login nav-dealers" href="#/wanted">Wanted</a>${FEATURES.dealerDirectory ? '<a class="nav-login nav-dealers" href="#/dealers">Dealers</a>' : ''}<a class="nav-login" href="#/login">Log in</a><a class="button" href="#/signup">Sign up</a>`;
     return;
   }
   const path = location.hash.split('?')[0] || '#/';
@@ -921,19 +921,29 @@ function requestForm({ initial = {}, edit = null, prefilled = false } = {}) {
         </div>
         <label>${edit ? 'Location' : 'Your location'} <span class="hint">city / state — helps dealers estimate shipping</span><input name="location" placeholder="Austin, TX" ${v('location')}></label>
         <label>Notes <textarea name="notes" placeholder="Matching numbers, under 80k miles, service records preferred…">${esc(initial.notes ?? '')}</textarea></label>
+        ${
+          edit
+            ? ''
+            : `<div class="field-block">
+                <span class="field-label">Photos of the car you want <span class="hint">optional, up to ${MAX_REQUEST_PHOTOS} — e.g. the exact spec, color or a screenshot of one you liked</span></span>
+                <div class="photo-picker" id="request-photos"></div>
+                <p class="hint">Photos appear in the public Wanted list (without your name), so use pictures you have the right to share and avoid ones showing people or license plates.</p>
+              </div>`
+        }
         <p class="error"></p>
         <div class="row"><button type="submit">${edit ? 'Save changes' : 'Post request'}</button><a href="${edit ? edit.cancelHref : '#/my'}">Cancel</a></div>
       </form>
     </div>`;
   const form = view.querySelector('form');
   const makeCheck = setupMakeField(form);
+  const picker = edit ? null : photoPicker(form.querySelector('#request-photos'), MAX_REQUEST_PHOTOS, form.querySelector('.error'));
   bindForm(form, async (data) => {
     if (makeCheck.pending()) throw new Error('Please check the make above — tap the suggestion or keep what you typed.');
     if (edit) {
       await api(`/api/admin/requests/${edit.id}`, { method: 'PATCH', body: data });
       return go(edit.cancelHref);
     }
-    const { request } = await api('/api/requests', { method: 'POST', body: data });
+    const { request } = await api('/api/requests', { method: 'POST', body: { ...data, photos: picker.photos } });
     storage('take');
     go(`#/request/${request.id}`);
   });
@@ -1079,7 +1089,7 @@ async function loadTicker() {
     .join('');
   // The list is repeated so the scroll can loop without a gap; the copy is hidden from screen readers.
   ticker.innerHTML = `
-    <div class="ticker-head">Latest requests</div>
+    <a class="ticker-head" href="#/wanted">Latest requests · See all →</a>
     <div class="ticker-window">
       <div class="ticker-track" style="--duration:${Math.max(30, requests.length * 6)}s">
         <div class="ticker-group">${items}</div>
@@ -1296,6 +1306,7 @@ async function requestDetail(id) {
             ? ` by <span class="inline-avatar">${avatar({ name: r.requesterName, avatarUrl: r.requesterAvatarUrl }, 22)}</span> ${esc(r.requesterName)}`
             : ''
       }</p>
+      ${requestPhotosHtml(r, { canEdit: isOwner || isAdminView })}
       <dl class="facts">
         <dt>Years</dt><dd>${esc(years(r))}</dd>
         <dt>Budget</dt><dd>${r.maxBudget != null ? `up to ${money(r.maxBudget)}` : 'Not specified'}</dd>
@@ -1408,6 +1419,7 @@ async function requestDetail(id) {
       render();
     }),
   );
+  bindRequestPhotos(r);
   view.querySelector('#renew')?.addEventListener('click', async () => {
     await api(`/api/requests/${r.id}/renew`, { method: 'POST' });
     render();
@@ -1540,6 +1552,56 @@ function responseCard(x, { isOwner, isAdminView, isDealerView, requestOpen }) {
           : ''
       }
     </div>`;
+}
+
+// The buyer's reference photos on a request; the buyer and admins can add or remove them.
+function requestPhotosHtml(r, { canEdit }) {
+  const photos = r.photos ?? [];
+  if (!photos.length && !canEdit) return '';
+  return `
+    <div class="request-photos">
+      ${
+        photos.length
+          ? `<div class="photo-grid">${photos
+              .map(
+                (p, i) => `<div class="photo-preview"><a href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.url)}" alt="Reference photo ${i + 1}" loading="lazy"></a>${
+                  canEdit ? `<button type="button" data-remove-request-photo="${p.id}" aria-label="Remove photo">×</button>` : ''
+                }</div>`,
+              )
+              .join('')}</div>`
+          : ''
+      }
+      ${
+        canEdit && photos.length < MAX_REQUEST_PHOTOS
+          ? `<label class="link-button" for="request-photo-input">${photos.length ? 'Add another photo' : '+ Add photos of the car you want'}</label>
+             <input id="request-photo-input" type="file" accept="image/*" multiple hidden>
+             <span class="hint">Shown publicly in the Wanted list, without your name.</span>
+             <p class="error" id="request-photo-error"></p>`
+          : ''
+      }
+    </div>`;
+}
+
+function bindRequestPhotos(r) {
+  view.querySelectorAll('[data-remove-request-photo]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      if (!confirm('Remove this photo?')) return;
+      await api(`/api/requests/${r.id}/photos/${b.dataset.removeRequestPhoto}`, { method: 'DELETE' });
+      render();
+    }),
+  );
+  const input = view.querySelector('#request-photo-input');
+  input?.addEventListener('change', async () => {
+    const files = [...input.files].slice(0, MAX_REQUEST_PHOTOS - (r.photos?.length ?? 0));
+    const error = view.querySelector('#request-photo-error');
+    error.textContent = 'Uploading…';
+    try {
+      for (const file of files) await api(`/api/requests/${r.id}/photos`, { method: 'POST', body: { photo: await shrinkPhoto(file) } });
+      render();
+    } catch (err) {
+      error.textContent = err.message;
+    }
+  });
 }
 
 // Buyer's "Interested / Not for me" buttons. The dealer sees the answer, never the buyer's contact details.
@@ -2062,6 +2124,111 @@ async function editDealerProfile() {
   );
 }
 
+// ---------- public Wanted list ----------
+
+// Everyone can see what buyers are hunting for, but not who they are and not how to reach them.
+// Approved dealers can open each request; everyone else is pointed at signing up.
+async function wantedPage(params) {
+  const state = { q: params.get('q') ?? '', make: params.get('make') ?? '' };
+  const highlight = params.get('r');
+  const isDealer = me?.role === 'dealer' && me.status === 'active';
+  const pageSize = 30;
+  const query = (offset) =>
+    new URLSearchParams({ ...Object.fromEntries(Object.entries(state).filter(([, v]) => v)), ...(highlight ? { first: highlight } : {}), limit: pageSize, offset }).toString();
+  const data = await api(`/api/public/requests?${query(0)}`);
+  const filtered = Boolean(state.q || state.make);
+
+  const card = (r) => {
+    const title = vehicleTitle(r);
+    const singleYear = r.yearMin && r.yearMin === r.yearMax; // already in the title
+    const facts = [!singleYear && years(r), r.budget && `Budget ${r.budget}`, r.condition !== 'any' && CONDITION_LABELS[r.condition], r.color, r.region && `Buyer in ${r.region}`].filter(Boolean);
+    const inner = `
+      <div class="wanted-photo${r.photos.length ? '' : ' empty'}">${
+        r.photos.length ? `<img src="${esc(r.photos[0])}" alt="" loading="lazy">${r.photos.length > 1 ? `<span class="photo-count">+${r.photos.length - 1}</span>` : ''}` : '<span>WANTED</span>'
+      }</div>
+      <div class="wanted-body">
+        <div class="wanted-title">${esc(title)}</div>
+        <div class="wanted-facts">${facts.map((f) => `<span>${esc(f)}</span>`).join('')}</div>
+        <div class="wanted-meta muted">Posted ${ago(r.createdAt)} · ${r.responseCount ? `${r.responseCount} dealer ${r.responseCount === 1 ? 'response' : 'responses'}` : 'No dealer responses yet'}</div>
+      </div>`;
+    return isDealer
+      ? `<a class="card wanted-card" id="wanted-${r.id}" href="#/request/${r.id}">${inner}<div class="wanted-actions"><span class="button small">View &amp; respond</span></div></a>`
+      : `<div class="card wanted-card" id="wanted-${r.id}">${inner}<div class="wanted-actions"><button type="button" class="secondary small" data-share="${r.id}" data-title="${esc(title)}">Know one? Share</button></div></div>`;
+  };
+
+  view.innerHTML = `
+    <section class="wanted-head">
+      <div>
+        <p class="eyebrow">Wanted</p>
+        <h1>What enthusiasts are hunting for right now</h1>
+        <p class="muted">${data.total} open ${data.total === 1 ? 'request' : 'requests'} from collectors and enthusiasts. Buyers stay anonymous; only verified dealers can see the full details and respond.</p>
+      </div>
+      ${
+        isDealer
+          ? ''
+          : `<div class="wanted-ctas">
+              <div class="card cta-mini"><strong>Have one of these cars, or know a dealer who does?</strong><p class="muted">Verified dealers can respond with photos and a price.</p>
+                <a class="button" href="#/signup?role=dealer">Become a dealer</a></div>
+              ${me?.role === 'dealer' ? '' : `<div class="card cta-mini"><strong>Hunting for something too?</strong><p class="muted">Post your own request. It's free.</p><a class="button secondary" href="${me ? '#/new' : '#/signup?role=user'}">Post a request</a></div>`}
+            </div>`
+      }
+    </section>
+    <form class="filters wanted-filters" id="wanted-filters">
+      <input class="search" name="q" type="search" placeholder="Search: 911, gt3, e46 m3…" value="${esc(state.q)}">
+      <select name="make"><option value="">All makes</option>${data.makes.map((m) => `<option${m === state.make ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select>
+    </form>
+    ${
+      data.requests.length
+        ? `<p class="muted">${filtered ? `${data.count} ${data.count === 1 ? 'request matches' : 'requests match'} · <a href="#/wanted">Clear</a>` : ''}</p>
+           <div class="wanted-grid" id="wanted-grid">${data.requests.map(card).join('')}</div>
+           ${data.count > pageSize ? '<div class="row" style="justify-content:center;margin:20px 0"><button class="secondary" id="wanted-more">Show more</button></div>' : ''}`
+        : `<div class="card empty">${data.total ? 'No requests match that search.' : 'No open requests yet. Be the first to post one!'}</div>`
+    }`;
+
+  const form = view.querySelector('#wanted-filters');
+  const apply = () => {
+    const next = new URLSearchParams(Object.entries(Object.fromEntries(new FormData(form))).filter(([, v]) => v)).toString();
+    go(`#/wanted${next ? `?${next}` : ''}`);
+  };
+  form.addEventListener('change', apply);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    apply();
+  });
+
+  let shown = data.requests.length;
+  view.querySelector('#wanted-more')?.addEventListener('click', async (e) => {
+    const more = await api(`/api/public/requests?${query(shown)}`);
+    view.querySelector('#wanted-grid').insertAdjacentHTML('beforeend', more.requests.map(card).join(''));
+    shown += more.requests.length;
+    if (shown >= more.count) e.target.remove();
+  });
+
+  // Share a single request, e.g. with a local dealer who might have the car.
+  view.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-share]');
+    if (!b) return;
+    const url = `${location.origin}/#/wanted?r=${b.dataset.share}`;
+    const text = `Someone on CarsFindMe is looking for a ${b.dataset.title}. Know a dealer who has one? Verified dealers can respond here:`;
+    try {
+      if (navigator.share) await navigator.share({ title: `Wanted: ${b.dataset.title}`, text, url });
+      else {
+        await navigator.clipboard.writeText(`${text} ${url}`);
+        b.textContent = 'Link copied ✓';
+      }
+    } catch {
+      /* share sheet closed */
+    }
+  });
+
+  // A shared link (#/wanted?r=12) scrolls to that request and highlights it.
+  const target = highlight && view.querySelector(`#wanted-${CSS.escape(highlight)}`);
+  if (target) {
+    target.classList.add('highlight');
+    target.scrollIntoView({ block: 'center' });
+  }
+}
+
 // One-click "still looking" link from the reminder email.
 async function renewPage(params) {
   view.innerHTML = '<div class="card narrow"><p>Keeping your request open…</p></div>';
@@ -2084,6 +2251,46 @@ async function renewPage(params) {
 }
 
 const MAX_PHOTOS = 6;
+const MAX_REQUEST_PHOTOS = 4;
+
+// "Add photos" button with removable previews. Photos are shrunk on the device before upload.
+function photoPicker(box, max, errorEl) {
+  const photos = [];
+  const id = `pick-${Math.random().toString(36).slice(2)}`;
+  box.innerHTML = `
+    <label class="button secondary small" for="${id}">Add photos</label>
+    <input id="${id}" type="file" accept="image/*" multiple hidden>
+    <span class="muted picker-hint">Up to ${max} photos</span>
+    <div class="photo-grid picker-previews"></div>`;
+  const previews = box.querySelector('.picker-previews');
+  const hint = box.querySelector('.picker-hint');
+  const draw = () => {
+    previews.innerHTML = photos
+      .map((src, i) => `<div class="photo-preview"><img src="${src}" alt=""><button type="button" data-remove="${i}" aria-label="Remove photo">×</button></div>`)
+      .join('');
+    hint.textContent = photos.length ? `${photos.length} of ${max} photos` : `Up to ${max} photos`;
+  };
+  previews.addEventListener('click', (e) => {
+    if (e.target.dataset.remove !== undefined) {
+      photos.splice(Number(e.target.dataset.remove), 1);
+      draw();
+    }
+  });
+  box.querySelector('input').addEventListener('change', async (e) => {
+    const files = [...e.target.files].slice(0, max - photos.length);
+    e.target.value = '';
+    hint.textContent = 'Preparing photos…';
+    for (const file of files) {
+      try {
+        photos.push(await shrinkPhoto(file));
+      } catch {
+        errorEl.textContent = `Couldn't read ${file.name}. Try a JPEG or PNG.`;
+      }
+    }
+    draw();
+  });
+  return { photos };
+}
 
 const REPORT_REASONS = {
   deposit: 'Asked for a deposit, wire or payment up front',
@@ -2669,6 +2876,7 @@ async function render() {
     '/renew': renewPage,
     '/signup': signup,
     '/contact': contactPage,
+    '/wanted': wantedPage,
     // While the directory is switched off, old links to it go to the homepage.
     '/dealers': FEATURES.dealerDirectory ? dealersPage : () => go('#/'),
   };
