@@ -120,6 +120,4 @@ Render snapshots the disk automatically every 24 hours and keeps each snapshot f
 
 ## Ideas for next steps
 
-- SMS alerts; a daily digest option for dealer alerts.
-- In-app messaging instead of sharing contact details.
-- Deploy behind HTTPS (e.g. Fly.io, Render, Railway) with a persistent volume for the SQLite file, or move to Postgres.
+See [IDEAS.md](IDEAS.md) for the running ideas log.
