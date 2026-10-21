@@ -592,9 +592,22 @@ button.danger-solid { background: var(--accent); color: var(--accent-text); bord
 .bubble.from-buyer { align-self: flex-end; }
 .bubble-body { white-space: pre-wrap; overflow-wrap: anywhere; }
 .bubble-meta { font-size: .75rem; opacity: .75; margin-top: 3px; }
-.chat-form textarea { min-height: 44px; resize: vertical; }
-.chat-actions { justify-content: space-between; align-items: center; margin-top: 6px; flex-wrap: nowrap; gap: 10px; }
-.chat-actions .hint { font-size: .8rem; }
+/* composer: [photo] [message box] [Send] in one rounded bar */
+.chat-compose { display: flex; align-items: flex-end; gap: 6px; padding: 6px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg); }
+.chat-compose:focus-within { border-color: var(--text); }
+.chat-compose textarea { flex: 1; min-height: 38px; max-height: 160px; resize: none; border: 0; background: transparent; padding: 8px 6px; box-shadow: none; outline: none; }
+.chat-attach { flex: none; width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; cursor: pointer; color: var(--muted); }
+.chat-attach:hover { color: var(--accent); background: var(--surface); }
+.chat-attach svg { width: 22px; height: 22px; }
+.chat-send { flex: none; height: 38px; border-radius: 10px; }
+.chat-hint { font-size: .78rem; margin: 6px 2px 0; }
+.chat-attachments { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.chat-attachments .photo-preview { width: 72px; }
+.chat-attachments img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; display: block; }
+.bubble-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 4px; margin: -2px -6px 6px; }
+.bubble-photos img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; display: block; }
+.bubble.photos-only .bubble-photos { margin-bottom: 4px; }
+.bubble:has(.bubble-photos) { min-width: min(260px, 78%); }
 .unread-badge { display: inline-block; background: var(--accent); color: var(--accent-text); font-size: .72rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
 .unread-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); vertical-align: middle; margin-left: 4px; }
 .account-button { position: relative; }
@@ -616,3 +629,4 @@ button.danger-solid { background: var(--accent); color: var(--accent-text); bord
   background: var(--ok) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 8.2 7 10.5l4.5-5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat;
   box-shadow: 0 0 0 2px var(--surface);
 }
+.bubble-photos:has(> a:only-child) { grid-template-columns: minmax(0, 320px); }

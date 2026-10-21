@@ -293,8 +293,12 @@ test('buyer gets an email when a dealer responds', async () => {
   assert.match(email.html, /Motors &lt;b&gt;&amp; Co&lt;\/b&gt;/, 'dealer-supplied text is escaped in HTML');
   assert.doesNotMatch(email.html, /<script>/);
 
+  // One response per dealer; they edit it or use its chat afterwards.
+  assert.equal((await dealer('POST', `/api/requests/${id}/responses`, { message: 'Second offer' })).status, 409);
+
+  const other = await signup('dealer');
   failNextEmail = true;
-  const res = await dealer('POST', `/api/requests/${id}/responses`, { message: 'Second offer' });
+  const res = await other('POST', `/api/requests/${id}/responses`, { message: 'Second offer' });
   assert.equal(res.status, 201, 'email failure does not fail the response');
 });
 
@@ -1554,4 +1558,28 @@ test('buyer and dealer can chat on a response, privately', async () => {
   // Admins can read the conversation; rivals can't.
   assert.equal((await (await admin())('GET', path)).body.messages.length, 3);
   assert.equal((await rival('GET', path)).status, 404);
+});
+
+test('chat messages can include photos', async () => {
+  const buyer = await signup('user');
+  const dealer = await signup('dealer');
+  const { request } = (await buyer('POST', '/api/requests', { make: 'Porsche', model: 'Chat photos 993' })).body;
+  const { response } = (await dealer('POST', `/api/requests/${request.id}/responses`, { message: 'Have one' })).body;
+  const path = `/api/responses/${response.id}/messages`;
+
+  const photoOnly = await dealer('POST', path, { photos: [PNG, PNG] });
+  assert.equal(photoOnly.status, 201, JSON.stringify(photoOnly.body));
+  assert.equal(photoOnly.body.messages[0].photos.length, 2);
+  assert.equal(photoOnly.body.messages[0].body, '');
+  await tick();
+  assert.ok(sentEmails.some((e) => e.to === buyer.account.email && /Sent a photo|Sent 2 photos/.test(e.text)));
+
+  const both = await buyer('POST', path, { body: 'Can you send the interior?', photos: [PNG] });
+  assert.equal(both.body.messages[1].photos.length, 1);
+  assert.equal((await buyer('POST', path, { photos: [PNG, PNG, PNG, PNG, PNG] })).status, 400, 'max 4 at a time');
+  assert.equal((await buyer('POST', path, {})).status, 400, 'needs text or a photo');
+
+  const shown = (await buyer('GET', `/api/requests/${request.id}`)).body.responses[0].messages;
+  assert.equal(shown[0].photos.length, 2);
+  assert.equal((await fetch(base + shown[0].photos[0])).status, 200);
 });

@@ -15,7 +15,7 @@ Things we've discussed and want to come back to. Newest ideas at the top of each
 - **Price-drop notice:** email the buyer when a dealer lowers the price on a response they passed on for price.
 - **Dealer directory and homepage dealer strip** — built, switched off (`public/features.js` → `dealerDirectory`).
 - SMS alerts; a daily digest option for dealer alerts.
-- Chat extras: photos in messages, typing/read receipts, push notifications for new messages (with the installable app).
+- Chat extras: typing/read receipts, push notifications for new messages (with the installable app).
 
 ## Business
 

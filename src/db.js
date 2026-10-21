@@ -159,6 +159,15 @@ const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_response_messages_response ON response_messages(response_id, id);
 
+  -- Photos sent in a chat message.
+  CREATE TABLE IF NOT EXISTS message_photos (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL REFERENCES response_messages(id) ON DELETE CASCADE,
+    filename   TEXT NOT NULL UNIQUE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_message_photos_message ON message_photos(message_id);
+
   -- Reference photos a buyer adds to a request ("this exact spec"). Shown publicly in the Wanted list.
   CREATE TABLE IF NOT EXISTS request_photos (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

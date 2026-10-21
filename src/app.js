@@ -299,6 +299,7 @@ const esc = (v) =>
 
 const MAX_GALLERY = 8;
 const MAX_REQUEST_PHOTOS = 4;
+const MAX_CHAT_PHOTOS = 4;
 
 // Public Wanted list: budgets are shown as a range, never the exact number.
 const BUDGET_RANGES = [25_000, 50_000, 100_000, 250_000, 500_000, 1_000_000];
@@ -754,6 +755,12 @@ export function createApp(
       SELECT m.*, a.name AS sender_name, a.business_name AS sender_business, a.role AS sender_role, a.avatar AS sender_avatar
       FROM response_messages m JOIN accounts a ON a.id = m.sender_id WHERE m.response_id = ? ORDER BY m.id`),
     insertMessage: db.prepare('INSERT INTO response_messages (response_id, sender_id, body) VALUES (?, ?, ?)'),
+    insertMessagePhoto: db.prepare('INSERT INTO message_photos (message_id, filename) VALUES (?, ?)'),
+    photosForMessage: db.prepare('SELECT filename FROM message_photos WHERE message_id = ? ORDER BY id'),
+    activeResponseOf: db.prepare('SELECT id FROM responses WHERE request_id = ? AND dealer_id = ? AND withdrawn_at IS NULL'),
+    messagePhotosForRequest: db.prepare(`
+      SELECT p.filename FROM message_photos p JOIN response_messages m ON m.id = p.message_id
+      JOIN responses x ON x.id = m.response_id WHERE x.request_id = ?`),
     markBuyerRead: db.prepare('UPDATE responses SET buyer_read_id = (SELECT MAX(id) FROM response_messages WHERE response_id = :id) WHERE id = :id'),
     markDealerRead: db.prepare('UPDATE responses SET dealer_read_id = (SELECT MAX(id) FROM response_messages WHERE response_id = :id) WHERE id = :id'),
     unreadInThread: db.prepare(`
@@ -773,7 +780,10 @@ export function createApp(
       UNION ALL SELECT filename FROM dealer_photos WHERE dealer_id = :id
       UNION ALL SELECT p.filename FROM request_photos p JOIN requests r ON r.id = p.request_id WHERE r.user_id = :id
       UNION ALL SELECT p.filename FROM response_photos p JOIN responses x ON x.id = p.response_id
-        WHERE x.dealer_id = :id OR x.request_id IN (SELECT id FROM requests WHERE user_id = :id)`),
+        WHERE x.dealer_id = :id OR x.request_id IN (SELECT id FROM requests WHERE user_id = :id)
+      UNION ALL SELECT p.filename FROM message_photos p JOIN response_messages m ON m.id = p.message_id
+        JOIN responses x ON x.id = m.response_id
+        WHERE m.sender_id = :id OR x.dealer_id = :id OR x.request_id IN (SELECT id FROM requests WHERE user_id = :id)`),
     insertSession: db.prepare('INSERT INTO sessions (token, account_id) VALUES (?, ?)'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
     insertRequest: db.prepare(`
@@ -1162,6 +1172,7 @@ export function createApp(
       mine: m.sender_id === viewer.id,
       from: m.sender_role === 'dealer' ? 'dealer' : 'buyer',
       senderName: m.sender_role === 'dealer' ? m.sender_business || m.sender_name : String(m.sender_name).split(/\s+/)[0],
+      photos: q.photosForMessage.all(m.id).map((p) => photoUrl(p.filename)),
     }));
   }
 
@@ -1486,14 +1497,20 @@ export function createApp(
     ['POST', /^\/api\/responses\/(\d+)\/messages$/, async (req, res, [id]) => {
       const account = requireAccount(req);
       const { response, request, side } = loadThread(account, Number(id));
-      const body = str((await readJson(req)).body, 'Message', { required: true, max: 2000 });
+      const input = await readJson(req, MAX_PHOTO_BODY_BYTES);
+      const body = str(input.body, 'Message', { max: 2000 }) ?? '';
+      const photos = decodePhotos(input.photos);
+      if (photos.length > MAX_CHAT_PHOTOS) throw new HttpError(400, `You can send up to ${MAX_CHAT_PHOTOS} photos at a time`);
+      if (!body && !photos.length) throw new HttpError(400, 'Write a message or add a photo');
+      if (photos.length && !uploadsDir) throw new HttpError(400, 'Photo uploads are not available');
       throttle([['messagesPerAccount', String(account.id)]]);
       const otherId = side === 'buyer' ? response.dealer_id : request.user_id;
       const other = q.accountById.get(otherId);
       if (!other || other.frozen_at) throw new HttpError(403, 'This conversation is closed');
       // Email the other person only for the first message they haven't read yet.
       const alreadyWaiting = q.unreadInThread.get({ id: response.id, reader: other.id, side: side === 'buyer' ? 'dealer' : 'buyer' }).n > 0;
-      q.insertMessage.run(response.id, account.id, body);
+      const { lastInsertRowid: messageId } = q.insertMessage.run(response.id, account.id, body);
+      for (const photo of photos) q.insertMessagePhoto.run(messageId, await storeImage(photo));
       markRead(response.id, side);
       sendJson(res, 201, { messages: threadMessages(response.id, account) });
       if (!alreadyWaiting) {
@@ -1502,7 +1519,7 @@ export function createApp(
           recipientName: other.name,
           senderName: side === 'buyer' ? account.name.split(/\s+/)[0] : account.business_name || account.name,
           request,
-          body,
+          body: body || `Sent ${photos.length === 1 ? 'a photo' : `${photos.length} photos`}.`,
           link: `${appUrl}/#/request/${request.id}?chat=${response.id}`,
         }));
       }
@@ -1944,6 +1961,10 @@ export function createApp(
       const request = loadRequest(Number(id));
       assertVisibleToDealers(request);
       if (request.status !== 'open') throw new HttpError(409, 'This request is no longer open');
+      // One response per dealer: after that they edit it or keep talking in its chat.
+      if (q.activeResponseOf.get(request.id, account.id)) {
+        throw new HttpError(409, "You've already responded to this request. Edit your response or use its chat to add more.");
+      }
       const body = await readJson(req, MAX_PHOTO_BODY_BYTES);
       const message = str(body.message, 'Message', { required: true, max: 2000 });
       const price = int(body.price, 'Price', { min: 0, max: 100_000_000 });
@@ -2207,6 +2228,7 @@ export function createApp(
       const files = [
         ...q.photosForRequest.all(request.id).map((p) => p.filename),
         ...q.requestPhotos.all(request.id).map((p) => p.filename),
+        ...q.messagePhotosForRequest.all(request.id).map((p) => p.filename),
       ];
       q.deleteRequest.run(request.id);
       await removePhotoFiles(files);

@@ -1399,7 +1399,7 @@ async function requestDetail(id, params = new URLSearchParams()) {
     }
     ${responseHtml}
     ${
-      viewer === 'dealer' && r.status === 'open'
+      viewer === 'dealer' && r.status === 'open' && !responses.some((x) => !x.withdrawn)
         ? `<div class="card">
             <h3>Respond to this buyer</h3>
             <p class="muted">Your business name, email${me.phone ? ', and phone' : ''} will be shared with the buyer.</p>
@@ -1662,23 +1662,31 @@ function bindRequestPhotos(r) {
 function chatHtml(x, { isOwner, isAdminView, isDealerView }) {
   if (!isOwner && !isDealerView && !isAdminView) return '';
   const messages = x.messages ?? [];
-  const other = isOwner ? 'the dealer' : 'the buyer';
   const canWrite = isOwner || isDealerView;
   if (!messages.length && !canWrite) return '';
-  const open = messages.length > 0;
+  const placeholder = isOwner
+    ? 'Chat with the dealer: ask about history, more photos or a viewing…'
+    : 'Chat with the buyer: share more details or photos, or answer their questions…';
   return `
     <div class="chat" data-chat="${x.id}">
       <div class="chat-head">
-        <strong>Messages</strong>${x.unread ? ` <span class="unread-badge">${x.unread} new</span>` : ''}
+        <strong>Chat</strong>${x.unread ? ` <span class="unread-badge">${x.unread} new</span>` : ''}
         ${isAdminView ? '<span class="hint">Admin view: read-only</span>' : ''}
       </div>
-      <div class="chat-thread"${open ? '' : ' hidden'}>${chatMessagesHtml(messages, isAdminView)}</div>
+      <div class="chat-thread"${messages.length ? '' : ' hidden'}>${chatMessagesHtml(messages, isAdminView)}</div>
       ${
         canWrite
-          ? `<button type="button" class="secondary small chat-start"${open ? ' hidden' : ''}>Message ${other}</button>
-             <form class="chat-form"${open ? '' : ' hidden'}>
-               <textarea name="body" rows="2" maxlength="2000" placeholder="Write a message to ${other}…" required></textarea>
-               <div class="row chat-actions"><span class="hint">Keep the conversation here, and never pay a deposit before seeing the car.</span><button type="submit" class="small">Send</button></div>
+          ? `<form class="chat-form">
+               <div class="chat-attachments" hidden></div>
+               <div class="chat-compose">
+                 <label class="chat-attach" title="Add photos" aria-label="Add photos">
+                   <svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5.2-5.2a1.5 1.5 0 0 0-2.1 0L5 19.5"/></g></svg>
+                   <input type="file" accept="image/*" multiple hidden>
+                 </label>
+                 <textarea name="body" rows="1" maxlength="2000" placeholder="${placeholder}"></textarea>
+                 <button type="submit" class="small chat-send">Send</button>
+               </div>
+               <p class="hint chat-hint">Enter to send · Shift+Enter for a new line · Never pay a deposit before seeing the car.</p>
                <p class="error"></p>
              </form>`
           : ''
@@ -1690,8 +1698,13 @@ function chatMessagesHtml(messages, isAdminView = false) {
   return messages
     .map(
       (m) => `
-      <div class="bubble ${m.mine ? 'mine' : 'theirs'}${isAdminView ? ` from-${m.from}` : ''}" data-message="${m.id}">
-        <div class="bubble-body">${esc(m.body)}</div>
+      <div class="bubble ${m.mine ? 'mine' : 'theirs'}${isAdminView ? ` from-${m.from}` : ''}${m.body ? '' : ' photos-only'}" data-message="${m.id}">
+        ${
+          m.photos?.length
+            ? `<div class="bubble-photos">${m.photos.map((src) => `<a href="${esc(src)}" target="_blank" rel="noopener"><img src="${esc(src)}" alt="Photo" loading="lazy"></a>`).join('')}</div>`
+            : ''
+        }
+        ${m.body ? `<div class="bubble-body">${esc(m.body)}</div>` : ''}
         <div class="bubble-meta">${m.mine ? 'You' : esc(m.senderName)} · ${ago(m.createdAt)}</div>
       </div>`,
     )
@@ -1713,11 +1726,40 @@ function bindChats(focusId) {
     scrollDown(chat.querySelector('.chat-thread'));
     const form = chat.querySelector('.chat-form');
     if (!form) continue;
-    chat.querySelector('.chat-start').addEventListener('click', (e) => {
-      e.target.hidden = true;
-      form.hidden = false;
-      form.body.focus();
+    // Photos waiting to be sent with the next message.
+    const photos = [];
+    const tray = form.querySelector('.chat-attachments');
+    const drawTray = () => {
+      tray.hidden = !photos.length;
+      tray.innerHTML = photos
+        .map((src, i) => `<div class="photo-preview"><img src="${src}" alt=""><button type="button" data-remove="${i}" aria-label="Remove photo">×</button></div>`)
+        .join('');
+    };
+    tray.addEventListener('click', (e) => {
+      if (e.target.dataset.remove !== undefined) {
+        photos.splice(Number(e.target.dataset.remove), 1);
+        drawTray();
+      }
     });
+    const fileInput = form.querySelector('.chat-attach input');
+    fileInput.addEventListener('change', async () => {
+      const files = [...fileInput.files].slice(0, 4 - photos.length);
+      fileInput.value = '';
+      for (const file of files) {
+        try {
+          photos.push(await shrinkPhoto(file));
+        } catch {
+          form.querySelector('.error').textContent = `Couldn't read ${file.name}. Try a JPEG or PNG.`;
+        }
+      }
+      drawTray();
+    });
+    // The message box grows with what's typed.
+    const grow = () => {
+      form.body.style.height = 'auto';
+      form.body.style.height = `${Math.min(form.body.scrollHeight, 160)}px`;
+    };
+    form.body.addEventListener('input', grow);
     // Enter sends, Shift+Enter adds a line.
     form.body.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -1728,13 +1770,16 @@ function bindChats(focusId) {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const body = form.body.value.trim();
-      if (!body) return;
+      if (!body && !photos.length) return;
       const button = form.querySelector('button[type=submit]');
       button.disabled = true;
       form.querySelector('.error').textContent = '';
       try {
-        const { messages } = await api(`/api/responses/${id}/messages`, { method: 'POST', body: { body } });
+        const { messages } = await api(`/api/responses/${id}/messages`, { method: 'POST', body: { body, photos } });
         form.body.value = '';
+        grow();
+        photos.length = 0;
+        drawTray();
         show(chat, messages);
       } catch (err) {
         form.querySelector('.error').textContent = err.message;
@@ -1749,7 +1794,6 @@ function bindChats(focusId) {
   const target = focusId && view.querySelector(`[data-chat="${CSS.escape(focusId)}"]`);
   if (target) {
     target.scrollIntoView({ block: 'center' });
-    target.querySelector('.chat-start:not([hidden])')?.click();
     target.querySelector('textarea')?.focus({ preventScroll: true });
   }
   // Check for replies every 15 seconds while this page is open and visible.
