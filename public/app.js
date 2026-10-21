@@ -1997,7 +1997,7 @@ function profileHtml(p, { viewer }) {
   const isAdminView = viewer === 'admin';
   return `
     <article class="dealer-profile">
-      <div class="dealer-cover"${p.coverUrl ? ` style="background-image:url('${esc(p.coverUrl)}')"` : ''}></div>
+      ${coverHtml(p.coverUrl)}
       <div class="card dealer-head">
         <div class="dealer-identity">
           ${avatar({ role: 'dealer', businessName: p.businessName, avatarUrl: p.avatarUrl }, 96)}
@@ -2034,8 +2034,10 @@ function profileHtml(p, { viewer }) {
         </div>
         <aside>
           ${
-            p.checked.length
-              ? `<section class="card trust"><h2>What CarsFindMe checked</h2><ul>${p.checked.map((c) => `<li>✓ ${esc(c)}</li>`).join('')}</ul>
+            p.checks.length
+              ? `<section class="card trust"><h2>What CarsFindMe checked</h2><ul>${p.checks
+                  .map((c) => `<li><span class="trust-icon">${TRUST_ICONS[c.key] ?? TRUST_ICONS.done}</span><span>${esc(c.label)}</span></li>`)
+                  .join('')}</ul>
                   <p class="hint">We verify dealers before they can see buyer requests. Still, always inspect a car and check its title before paying.</p></section>`
               : ''
           }
@@ -2050,6 +2052,37 @@ function profileHtml(p, { viewer }) {
       </div>
     </article>`;
 }
+
+// Icons for the "What CarsFindMe checked" list, each with a small check badge.
+const trustIcon = (path) => `<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${path}</g></svg>`;
+const TRUST_ICONS = {
+  // ID card: the dealer license
+  license: trustIcon('<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="8.5" cy="11" r="2"/><path d="M5.8 16c.6-1.4 1.6-2 2.7-2s2.1.6 2.7 2M14 10h4M14 13.5h3"/>'),
+  // Globe: website and listings
+  web: trustIcon('<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5S14.4 18.1 12 20.5M12 3.5C9.6 5.9 8.4 8.7 8.4 12s1.2 6.1 3.6 8.5"/>'),
+  // Phone: the verification call
+  call: trustIcon('<path d="M8.2 3.8 6 4.4c-1 .3-1.6 1.3-1.4 2.3.9 5.6 5.1 10 10.7 11.1 1 .2 2-.4 2.3-1.4l.6-2.2c.2-.6-.1-1.2-.7-1.5l-2.7-1.2c-.5-.2-1.1-.1-1.5.3l-1 1.1c-1.9-.9-3.4-2.4-4.3-4.3l1.1-1c.4-.4.5-1 .3-1.5L9.7 4.5c-.3-.6-.9-.9-1.5-.7Z"/>'),
+  done: trustIcon('<path d="M5 12.5 10 17 19 7"/>'),
+};
+
+// Cover banner. A photo too small for the banner is never stretched (that's what makes it look
+// pixelated): it's shown at its real size, centered over a blurred copy of itself.
+function coverHtml(url, extra = '') {
+  if (!url) return `<div class="dealer-cover ${extra}"></div>`;
+  return `<div class="dealer-cover has-image ${extra}">
+    <div class="cover-blur" style="background-image:url('${esc(url)}')"></div>
+    <img class="cover-img" src="${esc(url)}" alt="" onload="fitCover(this)">
+  </div>`;
+}
+window.fitCover = (img) => {
+  const box = img.parentElement;
+  const needed = box.clientWidth * Math.min(window.devicePixelRatio || 1, 2) * 0.75;
+  img.classList.toggle('too-small', img.naturalWidth < needed);
+  const small = img.classList.contains('too-small');
+  img.style.maxWidth = small ? `min(${img.naturalWidth}px, 100%)` : '';
+  img.style.maxHeight = small ? `min(${img.naturalHeight}px, 100%)` : '';
+};
+window.addEventListener('resize', () => document.querySelectorAll('.cover-img').forEach((img) => img.complete && window.fitCover(img)));
 
 async function dealerProfilePage(slug) {
   let data;
@@ -2140,8 +2173,9 @@ async function editDealerProfile() {
           </div>
         </div>
         <h3 class="subhead">Cover photo</h3>
-        <div class="dealer-cover small"${p.coverUrl ? ` style="background-image:url('${esc(p.coverUrl)}')"` : ''}></div>
-        <p class="hint">A wide photo of your showroom or a car you're proud of.</p>
+        ${coverHtml(p.coverUrl, 'small')}
+        <p class="hint cover-size-note" hidden></p>
+        <p class="hint">A wide (landscape) photo of your showroom or a car you're proud of, at least 1600 pixels wide so it stays sharp. The middle of the photo is what shows.</p>
         <div class="row">
           <label class="button secondary small" for="cover-input">${p.coverUrl ? 'Change cover' : 'Upload cover'}</label>
           <input id="cover-input" type="file" accept="image/*" hidden>
@@ -2260,8 +2294,14 @@ async function editDealerProfile() {
     const file = cover.files[0];
     if (!file) return;
     try {
-      await api('/api/me/cover', { method: 'PUT', body: { photo: await shrinkPhoto(file, 1800) } });
-      editDealerProfile();
+      const { width } = await createImageBitmap(file);
+      await api('/api/me/cover', { method: 'PUT', body: { photo: await shrinkPhoto(file, 2400) } });
+      await editDealerProfile();
+      if (width < 1600) {
+        const note = view.querySelector('.cover-size-note');
+        note.hidden = false;
+        note.textContent = `Heads up: this photo is only ${width} pixels wide, so it can't fill the banner sharply. For best results, use one at least 1600 pixels wide (a landscape photo straight from a phone or camera works great).`;
+      }
     } catch (err) {
       view.querySelector('#cover-error').textContent = err.message;
     }

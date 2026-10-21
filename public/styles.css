@@ -599,3 +599,20 @@ button.danger-solid { background: var(--accent); color: var(--accent-text); bord
 .unread-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); vertical-align: middle; margin-left: 4px; }
 .account-button { position: relative; }
 .unread-dot.on-avatar { position: absolute; left: 30px; top: 6px; margin: 0; width: 10px; height: 10px; box-shadow: 0 0 0 2px var(--ink); }
+
+/* Cover banner: sharp photos fill it; small ones sit at real size over a blurred copy */
+.dealer-cover.has-image { position: relative; overflow: hidden; background-image: none; }
+.cover-blur { position: absolute; inset: -30px; background-size: cover; background-position: center; filter: blur(24px) brightness(.55); }
+.cover-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.cover-img.too-small { inset: auto; left: 50%; top: 50%; transform: translate(-50%, -50%); width: auto; height: auto; object-fit: contain; max-width: 100%; max-height: 100%; box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
+.dealer-cover.has-image .cover-img.too-small { border-radius: 6px; }
+
+/* "What CarsFindMe checked" with icons */
+.trust li { display: flex; align-items: center; gap: 12px; padding: 7px 0; color: var(--text); font-weight: 600; line-height: 1.3; }
+.trust-icon { position: relative; flex: none; width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.trust-icon svg { width: 22px; height: 22px; }
+.trust-icon::after {
+  content: ""; position: absolute; right: -4px; bottom: -4px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--ok) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 8.2 7 10.5l4.5-5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat;
+  box-shadow: 0 0 0 2px var(--surface);
+}

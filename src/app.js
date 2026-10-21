@@ -395,15 +395,16 @@ function dealerState(d) {
 }
 
 // What CarsFindMe checked, in words a buyer understands. Never includes the admin's notes.
-function checkedLabels(dealer) {
+function checkedItems(dealer) {
   const checks = parseChecks(dealer);
   const broker = dealer.dealer_type === 'broker';
   return [
-    checks.license && `Dealer license checked${dealer.license_state ? ` with ${dealer.license_state}` : ''}`,
-    checks.web && (broker ? 'Website or references checked' : 'Website and business listing checked'),
-    checks.call && 'Business phone called to confirm',
+    checks.license && { key: 'license', label: `Dealer license checked${dealer.license_state ? ` with ${dealer.license_state}` : ''}` },
+    checks.web && { key: 'web', label: broker ? 'Website or references checked' : 'Website and business listing checked' },
+    checks.call && { key: 'call', label: 'Business phone called to confirm' },
   ].filter(Boolean);
 }
+const checkedLabels = (dealer) => checkedItems(dealer).map((c) => c.label);
 
 // ---------- http helpers ----------
 
@@ -1007,6 +1008,7 @@ export function createApp(
       instagram: d.instagram,
       verified: isVerifiedDealer(d),
       checked: checkedLabels(d),
+      checks: checkedItems(d),
       memberSince: d.created_at,
       responseCount: q.dealerResponseCount.get(d.id).n,
       gallery: q.galleryFor.all(d.id).map((p) => ({ id: p.id, url: photoUrl(p.filename), caption: p.caption })),
