@@ -574,3 +574,9 @@ a.wanted-card:hover { box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
 @media (max-width: 760px) { .wanted-head { grid-template-columns: 1fr; } }
 .field-label .hint { display: block; font-weight: 400; margin-top: 2px; }
 .request-photos .hint { display: block; margin-top: 2px; }
+
+/* Delete my account */
+.danger-zone { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); margin-top: 24px; }
+.danger-zone h2 { font-size: 1.15rem; }
+.profile + .danger-zone, .card.profile ~ .danger-zone { max-width: 560px; margin-left: auto; margin-right: auto; }
+button.danger-solid { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }

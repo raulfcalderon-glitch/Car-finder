@@ -13,6 +13,7 @@ import {
   newRequestAlertEmail,
   dealerReportEmail,
   contactEmail,
+  accountDeletedEmail,
   requestExpiringEmail,
   requestExpiredEmail,
   responseInterestEmail,
@@ -743,6 +744,15 @@ export function createApp(
       FROM responses x JOIN accounts a ON a.id = x.dealer_id
       WHERE x.request_id = ? ORDER BY x.created_at ASC, x.id ASC`),
     accountById: db.prepare('SELECT * FROM accounts WHERE id = ?'),
+    deleteAccount: db.prepare('DELETE FROM accounts WHERE id = ?'),
+    // Every uploaded file that belongs to an account, so deleting it leaves nothing behind on disk.
+    filesOfAccount: db.prepare(`
+      SELECT avatar AS filename FROM accounts WHERE id = :id AND avatar IS NOT NULL
+      UNION ALL SELECT cover FROM accounts WHERE id = :id AND cover IS NOT NULL
+      UNION ALL SELECT filename FROM dealer_photos WHERE dealer_id = :id
+      UNION ALL SELECT p.filename FROM request_photos p JOIN requests r ON r.id = p.request_id WHERE r.user_id = :id
+      UNION ALL SELECT p.filename FROM response_photos p JOIN responses x ON x.id = p.response_id
+        WHERE x.dealer_id = :id OR x.request_id IN (SELECT id FROM requests WHERE user_id = :id)`),
     insertSession: db.prepare('INSERT INTO sessions (token, account_id) VALUES (?, ?)'),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
     insertRequest: db.prepare(`
@@ -1404,6 +1414,19 @@ export function createApp(
         status = 201;
       }
       startSession(res, account.id, status, { account: publicAccount(q.accountById.get(account.id)) });
+    }],
+
+    // Someone deletes their own account: their requests or responses, photos, profile and sign-ins go with it.
+    // They confirm by typing their email address.
+    ['DELETE', /^\/api\/me$/, async (req, res) => {
+      const account = requireAccount(req);
+      const confirm = String((await readJson(req)).confirm ?? '').trim().toLowerCase();
+      if (confirm !== account.email.toLowerCase()) throw new HttpError(400, 'Type your email address exactly to confirm');
+      const files = q.filesOfAccount.all({ id: account.id }).map((f) => f.filename);
+      q.deleteAccount.run(account.id); // sessions, requests, responses, photos and reports cascade
+      await removePhotoFiles(files);
+      sendJson(res, 200, { ok: true }, { 'Set-Cookie': `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0` });
+      notify(accountDeletedEmail({ account }));
     }],
 
     ['POST', /^\/api\/logout$/, async (req, res) => {

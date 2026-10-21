@@ -11,7 +11,6 @@ Things we've discussed and want to come back to. Newest ideas at the top of each
   - Separate Wanted list tab (Cars / Parts), dealer alerts by category, and a filter on the dealer Requests page.
 - **AI request check.** On posting, catch impossible combinations (e.g. "1985 Porsche 993"), understand shorthand ("E46 M3", "air-cooled 911") and fill fields from one sentence. Suggest, never change silently. Estimated cost a fraction of a cent per request. Hold until there are real requests to learn from.
 - **App:** first an installable web app (home-screen icon, push notifications for new responses and alerts), later an App Store app (needs Apple Developer account, Sign in with Apple, in-app account deletion, an LLC for a company listing).
-- **Delete my account** from My profile (required by Apple; good privacy practice).
 - **Buyer reviews of dealers**, only after a request is marked "found", one review per deal.
 - **Price-drop notice:** email the buyer when a dealer lowers the price on a response they passed on for price.
 - **Dealer directory and homepage dealer strip** — built, switched off (`public/features.js` → `dealerDirectory`).

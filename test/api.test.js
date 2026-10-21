@@ -1472,3 +1472,37 @@ test('anyone can browse the Wanted list, without who posted or how to reach them
   await (await admin())('PATCH', `/api/admin/requests/${request.id}`, { hidden: true });
   assert.ok(!(await anon('GET', '/api/public/requests?q=f355')).body.requests.some((r) => r.id === request.id));
 });
+
+test('people can delete their own account, and everything in it goes with it', async () => {
+  const { existsSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const fileOf = (url) => join(uploadsDir, url.split('/').pop());
+  const buyer = await signup('user');
+  const dealer = await signup('dealer');
+  const otherBuyer = await signup('user');
+  const { request } = (await buyer('POST', '/api/requests', { make: 'Porsche', model: 'Delete 993', photos: [PNG] })).body;
+  const { response } = (await dealer('POST', `/api/requests/${request.id}/responses`, { message: 'Have one', photos: [PNG] })).body;
+  const keep = (await otherBuyer('POST', '/api/requests', { make: 'BMW', model: 'Keep M3' })).body.request;
+  await dealer('POST', `/api/requests/${keep.id}/responses`, { message: 'Dealer reply to someone else' });
+  const requestPhoto = fileOf(request.photos[0].url), responsePhoto = fileOf(response.photos[0]);
+  assert.ok(existsSync(requestPhoto) && existsSync(responsePhoto));
+
+  // Must type their own email to confirm.
+  assert.equal((await buyer('DELETE', '/api/me', { confirm: 'nope' })).status, 400);
+  assert.equal((await client()('DELETE', '/api/me', { confirm: 'x' })).status, 401);
+
+  const done = await buyer('DELETE', '/api/me', { confirm: buyer.account.email.toUpperCase() });
+  assert.equal(done.status, 200, JSON.stringify(done.body));
+  await tick();
+  assert.ok(sentEmails.some((e) => e.to === buyer.account.email && /deleted/.test(e.subject)));
+  assert.equal((await buyer('GET', '/api/me')).body.account, null, 'signed out');
+  assert.equal((await client()('POST', '/api/login', { email: buyer.account.email, password: 'password123' })).status, 401);
+  assert.equal((await dealer('GET', `/api/requests/${request.id}`)).status, 404, 'their requests are gone');
+  assert.ok(!existsSync(requestPhoto) && !existsSync(responsePhoto), 'photo files are removed');
+
+  // A dealer deleting removes their responses, but not other people's requests.
+  assert.equal((await dealer('DELETE', '/api/me', { confirm: dealer.account.email })).status, 200);
+  const view = (await otherBuyer('GET', `/api/requests/${keep.id}`)).body;
+  assert.equal(view.request.model, 'Keep M3');
+  assert.equal(view.responses.length, 0);
+});

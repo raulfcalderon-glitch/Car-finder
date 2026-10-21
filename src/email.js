@@ -114,6 +114,24 @@ export function newDealerEmail({ dealer, to, appUrl, emailSignal }) {
   };
 }
 
+// Confirmation after someone deletes their own account.
+export function accountDeletedEmail({ account }) {
+  const first = account.name.split(/\s+/)[0];
+  return {
+    to: account.email,
+    subject: 'Your CarsFindMe account has been deleted',
+    text:
+      `Hi ${first},\n\n` +
+      `As you asked, we've deleted your CarsFindMe account and everything in it${account.role === 'dealer' ? ', including your profile and responses' : ', including your requests'}.\n\n` +
+      `If this wasn't you, reply to this email right away.\n\nThanks for trying CarsFindMe. You're welcome back any time.\n— CarsFindMe`,
+    html: wrap(`
+      <p>Hi ${esc(first)},</p>
+      <p>As you asked, we've deleted your CarsFindMe account and everything in it${account.role === 'dealer' ? ', including your profile and responses' : ', including your requests'}.</p>
+      <p>If this wasn't you, reply to this email right away.</p>
+      <p style="color:#5f6b7a;font-size:13px">Thanks for trying CarsFindMe. You're welcome back any time.<br>— CarsFindMe</p>`),
+  };
+}
+
 // Email to a dealer once an admin approves their account.
 export function dealerApprovedEmail({ dealer, appUrl }) {
   const link = `${appUrl}/#/browse`;

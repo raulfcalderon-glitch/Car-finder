@@ -221,7 +221,9 @@ function profilePage() {
         ${me.avatarUrl ? '<button class="secondary" id="avatar-remove">Remove photo</button>' : ''}
       </div>
       <p class="error"></p>
-    </div>`;
+    </div>
+    ${deleteAccountSection()}`;
+  bindDeleteAccount();
   const error = view.querySelector('.error');
   view.querySelector('#avatar-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
@@ -240,6 +242,52 @@ function profilePage() {
     me = (await api('/api/me/avatar', { method: 'DELETE' })).account;
     renderNav();
     profilePage();
+  });
+}
+
+// "Delete my account" at the bottom of My profile. Typing the email address confirms it.
+function deleteAccountSection() {
+  const what = me.role === 'dealer'
+    ? 'your dealer account, public profile and photos, and every response you\'ve sent (buyers will no longer see them)'
+    : 'your account, every request you\'ve posted with its photos, and the dealer responses to them';
+  return `
+    <section class="card danger-zone">
+      <h2>Delete my account</h2>
+      <p class="muted">This permanently deletes ${what}. It can't be undone.</p>
+      <button type="button" class="danger" id="delete-account-start">Delete my account…</button>
+      <form id="delete-account-form" hidden>
+        <label>To confirm, type your email address <span class="hint">${esc(me.email)}</span>
+          <input name="confirm" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+        </label>
+        <p class="error"></p>
+        <div class="row"><button type="submit" class="danger-solid">Permanently delete my account</button><button type="button" class="secondary" id="delete-account-cancel">Cancel</button></div>
+      </form>
+    </section>`;
+}
+
+function bindDeleteAccount() {
+  const form = view.querySelector('#delete-account-form');
+  const start = view.querySelector('#delete-account-start');
+  start.addEventListener('click', () => {
+    form.hidden = false;
+    start.hidden = true;
+    form.confirm.focus();
+  });
+  view.querySelector('#delete-account-cancel').addEventListener('click', () => {
+    form.hidden = true;
+    start.hidden = false;
+  });
+  bindForm(form, async (data) => {
+    await api('/api/me', { method: 'DELETE', body: data });
+    me = null;
+    renderNav();
+    renderBanner();
+    view.innerHTML = `
+      <div class="card narrow">
+        <h1>Your account has been deleted</h1>
+        <p>Everything in it has been removed, and we've sent a confirmation to your email. Thanks for trying CarsFindMe.</p>
+        <a class="button" href="#/">Back to the homepage</a>
+      </div>`;
   });
 }
 
@@ -2025,7 +2073,9 @@ async function editDealerProfile() {
         }
         <p class="error" id="gallery-error"></p>
       </section>
+      ${deleteAccountSection()}
     </div>`;
+  bindDeleteAccount();
 
   // Specialties as removable chips, with make suggestions.
   const chips = view.querySelector('#chips');

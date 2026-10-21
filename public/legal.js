@@ -98,7 +98,7 @@ export const PRIVACY_HTML = `
 <p>We keep your information while your account is open and for as long as needed for the purposes above, including resolving disputes and enforcing our Terms. Backups are kept for a limited time and then deleted.</p>
 
 <h2>6. Your choices and rights</h2>
-<p>You can ask to access, correct or delete your personal information, or close your account, by emailing <a href="mailto:hello@carsfindme.com">hello@carsfindme.com</a>. Depending on where you live (for example California or the EU/UK), you may have additional rights; we'll honor them as required by law. We'll never treat you differently for exercising your rights.</p>
+<p>You can delete your account at any time from <strong>My profile → Delete my account</strong>. This permanently removes your account and what you posted (requests or responses, photos and your profile) from the Service right away; copies in our backups are deleted when those backups expire. You can also ask to access, correct or delete your personal information, or close your account, by emailing <a href="mailto:hello@carsfindme.com">hello@carsfindme.com</a>. Depending on where you live (for example California or the EU/UK), you may have additional rights; we'll honor them as required by law. We'll never treat you differently for exercising your rights.</p>
 
 <h2>7. Security</h2>
 <p>We use reasonable safeguards, including encrypted connections (HTTPS), hashed passwords, and encrypted storage at our hosting provider. No system is perfectly secure, so please use a strong, unique password.</p>
