@@ -66,6 +66,7 @@ export const PRIVACY_HTML = `
   <li><strong>Dealer profiles:</strong> what dealers choose to add to their public profile: logo, cover and gallery photos, description, specialties, city, year founded and Instagram handle.</li>
   <li><strong>If you continue with Google:</strong> Google shares your name, email address and a Google account ID with us. We use them only to create your account and sign you in. We don't get your Google password or access to anything else in your Google account.</li>
   <li><strong>What you post:</strong> vehicle requests (make, model, years, budget, condition, color, location, notes and any reference photos you add) and dealer responses (messages, prices and photos).</li>
+  <li><strong>Messages:</strong> the conversation between a buyer and a dealer about a response. Only the two of them can read it. CarsFindMe admins can view conversations to investigate reports and keep the Service safe.</li>
   <li><strong>Technical information:</strong> your IP address and basic request details, used to keep the Service secure (for example, to block repeated password guessing), and the date you last signed in.</li>
   <li><strong>Cookies:</strong> one essential cookie that keeps you signed in. We don't use advertising or tracking cookies.</li>
 </ul>

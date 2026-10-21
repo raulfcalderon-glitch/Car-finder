@@ -143,14 +143,16 @@ function renderNav() {
     return;
   }
   const path = location.hash.split('?')[0] || '#/';
+  const inbox = me.role === 'dealer' ? '#/responses' : '#/my';
+  const dot = (href) => (me.unreadMessages && href === inbox ? ` <span class="unread-dot" title="${me.unreadMessages} unread ${me.unreadMessages === 1 ? 'message' : 'messages'}"></span>` : '');
   const links = navItems()
-    .map(([href, label]) => `<a href="${href}" class="${path === href || path.startsWith(`${href}/`) ? 'active' : ''}">${label}</a>`)
+    .map(([href, label]) => `<a href="${href}" class="${path === href || path.startsWith(`${href}/`) ? 'active' : ''}">${label}${dot(href)}</a>`)
     .join('');
   nav.innerHTML = `
     <div class="nav-links">${links}</div>
     <div class="account">
       <button class="account-button" id="account-button" aria-haspopup="menu" aria-expanded="false">
-        ${avatar(me, 32)}<span class="account-name">${esc(displayName(me))}</span>${chevron}
+        ${avatar(me, 32)}${me.unreadMessages ? '<span class="unread-dot on-avatar"></span>' : ''}<span class="account-name">${esc(displayName(me))}</span>${chevron}
       </button>
       <div class="menu" id="account-menu" role="menu" hidden>
         <div class="menu-head">
@@ -1176,7 +1178,7 @@ async function myRequests() {
                 <span>${r.hidden ? '<span class="pill closed">hidden</span> ' : ''}<span class="pill ${r.status}">${r.status}</span>${expiryPill(r)}</span>
               </div>
               <div class="muted">${esc(years(r))} · ${money(r.maxBudget)} · ${esc(CONDITION_LABELS[r.condition])} · posted ${ago(r.createdAt)}</div>
-              <div><strong>${r.responseCount}</strong> dealer ${r.responseCount === 1 ? 'response' : 'responses'}</div>
+              <div><strong>${r.responseCount}</strong> dealer ${r.responseCount === 1 ? 'response' : 'responses'}${r.unreadMessages ? ` <span class="unread-badge">${r.unreadMessages} new ${r.unreadMessages === 1 ? 'message' : 'messages'}</span>` : ''}</div>
             </a>`,
             )
             .join('')}</div>`
@@ -1307,7 +1309,7 @@ async function browse(params) {
   view.querySelectorAll('tbody tr').forEach((tr) => tr.addEventListener('click', () => go(`#/request/${tr.dataset.id}`)));
 }
 
-async function requestDetail(id) {
+async function requestDetail(id, params = new URLSearchParams()) {
   const { viewer, request: r, responses } = await api(`/api/requests/${id}`);
   const isOwner = viewer === 'owner';
   const isAdminView = viewer === 'admin';
@@ -1473,6 +1475,7 @@ async function requestDetail(id) {
     render();
   });
   bindResponseActions(responses);
+  bindChats(params.get('chat'));
 
   const form = view.querySelector('#response-form');
   if (form) {
@@ -1581,6 +1584,7 @@ function responseCard(x, { isOwner, isAdminView, isDealerView, requestOpen }) {
             </form>`
           : ''
       }
+      ${chatHtml(x, { isOwner, isAdminView, isDealerView })}
       ${
         isOwner
           ? x.reportedByMe
@@ -1650,6 +1654,122 @@ function bindRequestPhotos(r) {
       error.textContent = err.message;
     }
   });
+}
+
+// ---------- chat on a response ----------
+
+// The private conversation between the buyer and the dealer on one response. Admins can read it.
+function chatHtml(x, { isOwner, isAdminView, isDealerView }) {
+  if (!isOwner && !isDealerView && !isAdminView) return '';
+  const messages = x.messages ?? [];
+  const other = isOwner ? 'the dealer' : 'the buyer';
+  const canWrite = isOwner || isDealerView;
+  if (!messages.length && !canWrite) return '';
+  const open = messages.length > 0;
+  return `
+    <div class="chat" data-chat="${x.id}">
+      <div class="chat-head">
+        <strong>Messages</strong>${x.unread ? ` <span class="unread-badge">${x.unread} new</span>` : ''}
+        ${isAdminView ? '<span class="hint">Admin view: read-only</span>' : ''}
+      </div>
+      <div class="chat-thread"${open ? '' : ' hidden'}>${chatMessagesHtml(messages, isAdminView)}</div>
+      ${
+        canWrite
+          ? `<button type="button" class="secondary small chat-start"${open ? ' hidden' : ''}>Message ${other}</button>
+             <form class="chat-form"${open ? '' : ' hidden'}>
+               <textarea name="body" rows="2" maxlength="2000" placeholder="Write a message to ${other}…" required></textarea>
+               <div class="row chat-actions"><span class="hint">Keep the conversation here, and never pay a deposit before seeing the car.</span><button type="submit" class="small">Send</button></div>
+               <p class="error"></p>
+             </form>`
+          : ''
+      }
+    </div>`;
+}
+
+function chatMessagesHtml(messages, isAdminView = false) {
+  return messages
+    .map(
+      (m) => `
+      <div class="bubble ${m.mine ? 'mine' : 'theirs'}${isAdminView ? ` from-${m.from}` : ''}" data-message="${m.id}">
+        <div class="bubble-body">${esc(m.body)}</div>
+        <div class="bubble-meta">${m.mine ? 'You' : esc(m.senderName)} · ${ago(m.createdAt)}</div>
+      </div>`,
+    )
+    .join('');
+}
+
+let chatPoll = null;
+function bindChats(focusId) {
+  const threads = [...view.querySelectorAll('[data-chat]')];
+  const scrollDown = (box) => (box.scrollTop = box.scrollHeight);
+  const show = (chat, messages) => {
+    const box = chat.querySelector('.chat-thread');
+    box.innerHTML = chatMessagesHtml(messages);
+    box.hidden = !messages.length;
+    scrollDown(box);
+  };
+  for (const chat of threads) {
+    const id = chat.dataset.chat;
+    scrollDown(chat.querySelector('.chat-thread'));
+    const form = chat.querySelector('.chat-form');
+    if (!form) continue;
+    chat.querySelector('.chat-start').addEventListener('click', (e) => {
+      e.target.hidden = true;
+      form.hidden = false;
+      form.body.focus();
+    });
+    // Enter sends, Shift+Enter adds a line.
+    form.body.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = form.body.value.trim();
+      if (!body) return;
+      const button = form.querySelector('button[type=submit]');
+      button.disabled = true;
+      form.querySelector('.error').textContent = '';
+      try {
+        const { messages } = await api(`/api/responses/${id}/messages`, { method: 'POST', body: { body } });
+        form.body.value = '';
+        show(chat, messages);
+      } catch (err) {
+        form.querySelector('.error').textContent = err.message;
+      } finally {
+        button.disabled = false;
+        form.body.focus();
+      }
+    });
+    chat.querySelector('.unread-badge')?.remove(); // opening the page marks them read
+  }
+  // Opened from a "new message" email: jump to that conversation.
+  const target = focusId && view.querySelector(`[data-chat="${CSS.escape(focusId)}"]`);
+  if (target) {
+    target.scrollIntoView({ block: 'center' });
+    target.querySelector('.chat-start:not([hidden])')?.click();
+    target.querySelector('textarea')?.focus({ preventScroll: true });
+  }
+  // Check for replies every 15 seconds while this page is open and visible.
+  clearInterval(chatPoll);
+  const writable = threads.filter((c) => c.querySelector('.chat-form'));
+  if (!writable.length) return;
+  const page = location.hash;
+  chatPoll = setInterval(async () => {
+    if (location.hash !== page) return clearInterval(chatPoll);
+    if (document.hidden) return;
+    for (const chat of writable) {
+      try {
+        const { messages } = await api(`/api/responses/${chat.dataset.chat}/messages`);
+        const shown = chat.querySelectorAll('[data-message]').length;
+        if (messages.length !== shown) show(chat, messages);
+      } catch {
+        /* try again next time */
+      }
+    }
+  }, 15000);
 }
 
 // Buyer's "Interested / Not for me" buttons. The dealer sees the answer, never the buyer's contact details.
@@ -1732,7 +1852,7 @@ async function myResponses() {
             <a class="card request-card${x.withdrawn ? ' dimmed' : ''}" href="#/request/${x.request.id}">
               <div class="row spread">
                 <span class="vehicle">${esc(vehicleTitle(x.request))}</span>
-                <span><span class="pill ${x.request.status}">${x.request.status}</span> ${feedbackPill(x)}</span>
+                <span>${x.unreadMessages ? `<span class="unread-badge">${x.unreadMessages} new</span> ` : ''}<span class="pill ${x.request.status}">${x.request.status}</span> ${feedbackPill(x)}</span>
               </div>
               <div class="muted">${x.price != null ? `Your price ${money(x.price)} · ` : ''}buyer's budget ${money(x.request.maxBudget)} · sent ${ago(x.createdAt)}${x.updatedAt ? ` · edited ${ago(x.updatedAt)}` : ''}</div>
               <div class="muted clamp">${esc(x.message)}</div>
@@ -2907,12 +3027,32 @@ function verificationSection(a) {
 const home = () => (!me ? '#/' : me.role === 'dealer' ? '#/browse' : '#/my');
 const dealerBlocked = () => me.role === 'dealer' && me.status !== 'active';
 
+// Keeps the unread-message dot current. Runs shortly after each page change, once that page has
+// loaded (and marked its own messages read).
+let unreadTimer;
+function refreshUnread() {
+  clearTimeout(unreadTimer);
+  if (!me) return;
+  unreadTimer = setTimeout(async () => {
+    try {
+      const { account } = await api('/api/me');
+      if (account && me && account.unreadMessages !== me.unreadMessages) {
+        me = account;
+        renderNav();
+      }
+    } catch {
+      /* not important */
+    }
+  }, 800);
+}
+
 async function render() {
   const [path, search = ''] = location.hash.replace(/^#/, '').split('?');
   const params = new URLSearchParams(search);
   document.title = 'CarsFindMe';
   renderNav();
   renderBanner();
+  refreshUnread();
 
   // Pages anyone can open, signed in or not.
   const openRoutes = {
@@ -2955,7 +3095,7 @@ async function render() {
     if (me.isAdmin && adminEdit) return await adminEditRequest(adminEdit[1]);
     if (dealerBlocked()) return dealerNotApproved();
     const detail = path.match(/^\/request\/(\d+)$/);
-    if (detail) return await requestDetail(detail[1]);
+    if (detail) return await requestDetail(detail[1], params);
     if (me.role === 'user' && path === '/my') return await myRequests();
     if (me.role === 'user' && path === '/new') return newRequestPage();
     if (me.role === 'dealer' && path === '/browse') return await browse(params);

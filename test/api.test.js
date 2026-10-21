@@ -1506,3 +1506,52 @@ test('people can delete their own account, and everything in it goes with it', a
   assert.equal(view.request.model, 'Keep M3');
   assert.equal(view.responses.length, 0);
 });
+
+test('buyer and dealer can chat on a response, privately', async () => {
+  const buyer = await signup('user', { name: 'Chatty Buyer' });
+  const dealer = await signup('dealer');
+  const rival = await signup('dealer');
+  const stranger = await signup('user');
+  const { request } = (await buyer('POST', '/api/requests', { make: 'Porsche', model: 'Chat 911' })).body;
+  const { response } = (await dealer('POST', `/api/requests/${request.id}/responses`, { message: 'Have one' })).body;
+  const path = `/api/responses/${response.id}/messages`;
+
+  // Only the two of them can write.
+  assert.equal((await rival('POST', path, { body: 'hi' })).status, 404);
+  assert.equal((await stranger('POST', path, { body: 'hi' })).status, 404);
+  assert.equal((await (await admin())('POST', path, { body: 'hi' })).status, 404, 'admins read, not write');
+  assert.equal((await buyer('POST', path, { body: '   ' })).status, 400);
+
+  sentEmails.length = 0;
+  const first = await buyer('POST', path, { body: 'Is it still available?' });
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  assert.equal(first.body.messages[0].mine, true);
+  await buyer('POST', path, { body: 'And does it have the sport seats?' });
+  await tick();
+  const toDealer = sentEmails.filter((e) => e.to === dealer.account.email);
+  assert.equal(toDealer.length, 1, 'one email for a burst of messages');
+  assert.match(toDealer[0].subject, /New message from Chatty about/);
+  assert.ok(!toDealer[0].text.includes(buyer.account.email), "the buyer's email isn't revealed");
+
+  // The dealer sees them as unread, then reads them by opening the request.
+  assert.equal((await dealer('GET', '/api/me')).body.account.unreadMessages, 2);
+  assert.equal((await dealer('GET', '/api/my/responses')).body.responses.find((x) => x.id === response.id).unreadMessages, 2);
+  const view = (await dealer('GET', `/api/requests/${request.id}`)).body.responses[0];
+  assert.equal(view.unread, 2);
+  assert.equal(view.messages[0].senderName, 'Chatty', 'dealers only see the first name');
+  assert.equal((await dealer('GET', '/api/me')).body.account.unreadMessages, 0);
+
+  // The dealer replies; the buyer gets the badge and the email.
+  await dealer('POST', path, { body: 'Yes, and it does.' });
+  await tick();
+  assert.equal((await buyer('GET', '/api/me')).body.account.unreadMessages, 1);
+  assert.equal((await buyer('GET', '/api/my/requests')).body.requests.find((r) => r.id === request.id).unreadMessages, 1);
+  assert.ok(sentEmails.some((e) => e.to === buyer.account.email && /New message/.test(e.subject)));
+  const thread = (await buyer('GET', path)).body.messages;
+  assert.deepEqual(thread.map((m) => m.mine), [true, true, false]);
+  assert.equal((await buyer('GET', '/api/me')).body.account.unreadMessages, 0);
+
+  // Admins can read the conversation; rivals can't.
+  assert.equal((await (await admin())('GET', path)).body.messages.length, 3);
+  assert.equal((await rival('GET', path)).status, 404);
+});

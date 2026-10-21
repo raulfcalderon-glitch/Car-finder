@@ -114,6 +114,26 @@ export function newDealerEmail({ dealer, to, appUrl, emailSignal }) {
   };
 }
 
+// A new chat message on a response. Sent for the first unread message only, so a burst of messages is one email.
+export function newMessageEmail({ to, recipientName, senderName, request, body, link }) {
+  const vehicle = vehicleName(request);
+  const first = recipientName.split(/\s+/)[0];
+  const snippet = body.length > 400 ? `${body.slice(0, 400)}…` : body;
+  return {
+    to,
+    subject: `New message from ${senderName} about the ${vehicle}`,
+    text:
+      `Hi ${first},\n\n${senderName} sent you a message on CarsFindMe about the ${vehicle}:\n\n"${snippet}"\n\n` +
+      `Reply on CarsFindMe: ${link}\n\nReplying to this email won't reach them; use the link above.\n— CarsFindMe`,
+    html: wrap(`
+      <p>Hi ${esc(first)},</p>
+      <p><strong>${esc(senderName)}</strong> sent you a message about the <strong>${esc(vehicle)}</strong>:</p>
+      <blockquote style="margin:0 0 12px;padding:8px 14px;border-left:3px solid #c8102e;background:#f6f7f9;white-space:pre-wrap">${esc(snippet)}</blockquote>
+      <p>${button(link, 'Reply on CarsFindMe')}</p>
+      <p style="color:#5f6b7a;font-size:13px">Replying to this email won't reach them; use the button above.<br>— CarsFindMe</p>`),
+  };
+}
+
 // Confirmation after someone deletes their own account.
 export function accountDeletedEmail({ account }) {
   const first = account.name.split(/\s+/)[0];

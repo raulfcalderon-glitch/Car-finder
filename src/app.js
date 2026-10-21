@@ -14,6 +14,7 @@ import {
   dealerReportEmail,
   contactEmail,
   accountDeletedEmail,
+  newMessageEmail,
   requestExpiringEmail,
   requestExpiredEmail,
   responseInterestEmail,
@@ -253,6 +254,7 @@ function serializeRequest(r) {
     requesterName: r.requester_name ? String(r.requester_name).split(/\s+/)[0] : undefined,
     requesterAvatarUrl: r.requester_name ? photoUrl(r.requester_avatar) : undefined,
     responseCount: r.response_count ?? undefined,
+    unreadMessages: r.unread_count ?? undefined,
   };
 }
 
@@ -534,6 +536,7 @@ const DEFAULT_LIMITS = {
   emailPerIp: { max: 20, windowMs: 60 * MINUTE },
   signupPerIp: { max: 20, windowMs: 60 * MINUTE },
   contactPerIp: { max: 5, windowMs: 60 * MINUTE },
+  messagesPerAccount: { max: 60, windowMs: 60 * MINUTE }, // chat messages sent
 };
 
 function clientIp(req) {
@@ -589,6 +592,7 @@ export function createApp(
       alerts: a.role === 'dealer' ? alertSettings(a) : undefined,
       dealerType: a.role === 'dealer' ? (a.dealer_type ?? 'dealer') : undefined,
       verified: a.role === 'dealer' ? isVerifiedDealer(a) : undefined,
+      unreadMessages: (a.role === 'dealer' ? q.unreadForDealer : q.unreadForBuyer).get(a.id).n,
     };
   }
 
@@ -745,6 +749,22 @@ export function createApp(
       WHERE x.request_id = ? ORDER BY x.created_at ASC, x.id ASC`),
     accountById: db.prepare('SELECT * FROM accounts WHERE id = ?'),
     deleteAccount: db.prepare('DELETE FROM accounts WHERE id = ?'),
+    messagesFor: db.prepare(`
+      SELECT m.*, a.name AS sender_name, a.business_name AS sender_business, a.role AS sender_role, a.avatar AS sender_avatar
+      FROM response_messages m JOIN accounts a ON a.id = m.sender_id WHERE m.response_id = ? ORDER BY m.id`),
+    insertMessage: db.prepare('INSERT INTO response_messages (response_id, sender_id, body) VALUES (?, ?, ?)'),
+    markBuyerRead: db.prepare('UPDATE responses SET buyer_read_id = (SELECT MAX(id) FROM response_messages WHERE response_id = :id) WHERE id = :id'),
+    markDealerRead: db.prepare('UPDATE responses SET dealer_read_id = (SELECT MAX(id) FROM response_messages WHERE response_id = :id) WHERE id = :id'),
+    unreadInThread: db.prepare(`
+      SELECT COUNT(*) AS n FROM response_messages m JOIN responses x ON x.id = m.response_id
+      WHERE x.id = :id AND m.sender_id != :reader AND m.id > COALESCE(CASE WHEN :side = 'buyer' THEN x.buyer_read_id ELSE x.dealer_read_id END, 0)`),
+    // Unread messages across all of a buyer's requests / a dealer's responses (for the menu badge).
+    unreadForBuyer: db.prepare(`
+      SELECT COUNT(*) AS n FROM response_messages m JOIN visible_responses x ON x.id = m.response_id JOIN requests r ON r.id = x.request_id
+      WHERE r.user_id = ? AND m.sender_id = x.dealer_id AND m.id > COALESCE(x.buyer_read_id, 0)`),
+    unreadForDealer: db.prepare(`
+      SELECT COUNT(*) AS n FROM response_messages m JOIN responses x ON x.id = m.response_id JOIN visible_requests r ON r.id = x.request_id
+      WHERE x.dealer_id = ? AND m.sender_id != x.dealer_id AND m.id > COALESCE(x.dealer_read_id, 0)`),
     // Every uploaded file that belongs to an account, so deleting it leaves nothing behind on disk.
     filesOfAccount: db.prepare(`
       SELECT avatar AS filename FROM accounts WHERE id = :id AND avatar IS NOT NULL
@@ -790,7 +810,9 @@ export function createApp(
     withdrawResponse: db.prepare("UPDATE responses SET withdrawn_at = datetime('now') WHERE id = ? AND withdrawn_at IS NULL"),
     responsesByDealer: db.prepare(`
       SELECT x.*, r.make, r.model, r.trim, r.year_min, r.year_max, r.max_budget, r.status AS request_status,
-        r.expires_at, r.expired_at, a.name AS requester_name
+        r.expires_at, r.expired_at, a.name AS requester_name,
+        (SELECT COUNT(*) FROM response_messages m WHERE m.response_id = x.id AND m.sender_id != x.dealer_id
+          AND m.id > COALESCE(x.dealer_read_id, 0)) AS unread_count
       FROM responses x JOIN visible_requests r ON r.id = x.request_id JOIN accounts a ON a.id = r.user_id
       WHERE x.dealer_id = ? ORDER BY x.created_at DESC, x.id DESC`),
     hideRequest: db.prepare("UPDATE requests SET hidden_at = datetime('now'), hidden_reason = ? WHERE id = ?"),
@@ -801,7 +823,9 @@ export function createApp(
         (SELECT COUNT(*) FROM visible_responses x WHERE x.request_id = r.id) AS response_count
       FROM requests r JOIN accounts a ON a.id = r.user_id WHERE r.id = ?`),
     requestsByUser: db.prepare(`
-      SELECT r.*, (SELECT COUNT(*) FROM visible_responses x WHERE x.request_id = r.id) AS response_count
+      SELECT r.*, (SELECT COUNT(*) FROM visible_responses x WHERE x.request_id = r.id) AS response_count,
+        (SELECT COUNT(*) FROM response_messages m JOIN visible_responses x ON x.id = m.response_id
+          WHERE x.request_id = r.id AND m.sender_id = x.dealer_id AND m.id > COALESCE(x.buyer_read_id, 0)) AS unread_count
       FROM requests r WHERE r.user_id = ? ORDER BY r.created_at DESC, r.id DESC`),
     responsesForRequest: db.prepare(`
       SELECT x.*, a.name AS dealer_name, a.business_name, a.email AS dealer_email, a.phone AS dealer_phone, a.avatar AS dealer_avatar, a.dealer_type, a.license_number AS dealer_license_number,
@@ -1106,6 +1130,37 @@ export function createApp(
       );
     }
     return { reminded: reminded.length, expired: expired.length };
+  }
+
+  // Who may see a response's chat, and from which side. Admins can read but not post.
+  function loadThread(account, responseId, { allowAdmin = false } = {}) {
+    const response = q.responseById.get(responseId);
+    const request = response && q.requestById.get(response.request_id);
+    if (!response || !request) throw new HttpError(404, 'Conversation not found');
+    if (request.user_id === account.id) {
+      if (q.accountById.get(response.dealer_id)?.frozen_at) throw new HttpError(404, 'Conversation not found');
+      return { response, request, side: 'buyer' };
+    }
+    if (response.dealer_id === account.id) {
+      if (request.hidden_at || request.requester_frozen_at) throw new HttpError(404, 'Conversation not found');
+      return { response, request, side: 'dealer' };
+    }
+    if (allowAdmin && isAdmin(account)) return { response, request, side: null };
+    throw new HttpError(404, 'Conversation not found');
+  }
+
+  const markRead = (responseId, side) => (side === 'buyer' ? q.markBuyerRead : q.markDealerRead).run({ id: responseId });
+
+  // Messages as the viewer sees them. Dealers only ever see the buyer's first name.
+  function threadMessages(responseId, viewer) {
+    return q.messagesFor.all(responseId).map((m) => ({
+      id: m.id,
+      body: m.body,
+      createdAt: m.created_at,
+      mine: m.sender_id === viewer.id,
+      from: m.sender_role === 'dealer' ? 'dealer' : 'buyer',
+      senderName: m.sender_role === 'dealer' ? m.sender_business || m.sender_name : String(m.sender_name).split(/\s+/)[0],
+    }));
   }
 
   // A dealer's own response, for editing or withdrawing it.
@@ -1418,6 +1473,39 @@ export function createApp(
 
     // Someone deletes their own account: their requests or responses, photos, profile and sign-ins go with it.
     // They confirm by typing their email address.
+    // Chat on a response: only that buyer and that dealer can post; admins can read it too.
+    ['GET', /^\/api\/responses\/(\d+)\/messages$/, async (req, res, [id]) => {
+      const account = requireAccount(req);
+      const { response, side } = loadThread(account, Number(id), { allowAdmin: true });
+      if (side) markRead(response.id, side);
+      sendJson(res, 200, { messages: threadMessages(response.id, account) });
+    }],
+
+    ['POST', /^\/api\/responses\/(\d+)\/messages$/, async (req, res, [id]) => {
+      const account = requireAccount(req);
+      const { response, request, side } = loadThread(account, Number(id));
+      const body = str((await readJson(req)).body, 'Message', { required: true, max: 2000 });
+      throttle([['messagesPerAccount', String(account.id)]]);
+      const otherId = side === 'buyer' ? response.dealer_id : request.user_id;
+      const other = q.accountById.get(otherId);
+      if (!other || other.frozen_at) throw new HttpError(403, 'This conversation is closed');
+      // Email the other person only for the first message they haven't read yet.
+      const alreadyWaiting = q.unreadInThread.get({ id: response.id, reader: other.id, side: side === 'buyer' ? 'dealer' : 'buyer' }).n > 0;
+      q.insertMessage.run(response.id, account.id, body);
+      markRead(response.id, side);
+      sendJson(res, 201, { messages: threadMessages(response.id, account) });
+      if (!alreadyWaiting) {
+        notify(newMessageEmail({
+          to: other.email,
+          recipientName: other.name,
+          senderName: side === 'buyer' ? account.name.split(/\s+/)[0] : account.business_name || account.name,
+          request,
+          body,
+          link: `${appUrl}/#/request/${request.id}?chat=${response.id}`,
+        }));
+      }
+    }],
+
     ['DELETE', /^\/api\/me$/, async (req, res) => {
       const account = requireAccount(req);
       const confirm = String((await readJson(req)).confirm ?? '').trim().toLowerCase();
@@ -1887,6 +1975,7 @@ export function createApp(
         withdrawn: Boolean(x.withdrawn_at),
         feedback: x.feedback,
         feedbackReasonLabel: FEEDBACK_REASONS[x.feedback_reason],
+        unreadMessages: x.unread_count,
         request: serializeRequest({ ...x, id: x.request_id, status: x.request_status, created_at: undefined }),
       }));
       sendJson(res, 200, { responses });
@@ -2135,19 +2224,28 @@ export function createApp(
         responses = q.responsesForRequest.all(request.id).map((x) => ({
           ...withPhotos(x),
           reportedByMe: Boolean(q.reportedByMe.get(x.id, account.id)),
+          unread: q.unreadInThread.get({ id: x.id, reader: account.id, side: 'buyer' }).n,
+          messages: threadMessages(x.id, account),
         }));
+        responses.forEach((x) => markRead(x.id, 'buyer'));
       } else if (admin) {
         // Admins see every response, including ones hidden because the dealer is frozen.
         viewer = 'admin';
         responses = q.adminResponsesForRequest.all(request.id).map((x) => ({
           ...withPhotos(x),
           dealerFrozen: Boolean(x.dealer_frozen_at),
+          messages: threadMessages(x.id, account),
         }));
       } else if (account.role === 'dealer') {
         // Dealers see only their own replies, not competitors'.
         assertVisibleToDealers(request);
         viewer = 'dealer';
-        responses = q.responsesForRequestByDealer.all(request.id, account.id).map(withPhotos);
+        responses = q.responsesForRequestByDealer.all(request.id, account.id).map((x) => ({
+          ...withPhotos(x),
+          unread: q.unreadInThread.get({ id: x.id, reader: account.id, side: 'dealer' }).n,
+          messages: threadMessages(x.id, account),
+        }));
+        responses.forEach((x) => markRead(x.id, 'dealer'));
       } else {
         throw new HttpError(404, 'Request not found');
       }

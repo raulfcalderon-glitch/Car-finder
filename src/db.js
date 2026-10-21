@@ -114,6 +114,8 @@ const SCHEMA = `
     feedback_at     TEXT,
     updated_at      TEXT, -- last edit by the dealer
     withdrawn_at    TEXT, -- the dealer took the offer back (e.g. the car sold)
+    buyer_read_id   INTEGER, -- last chat message the buyer has seen
+    dealer_read_id  INTEGER, -- last chat message the dealer has seen
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -145,6 +147,17 @@ const SCHEMA = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_dealer_reports_dealer ON dealer_reports(dealer_id, status);
+
+  -- Private chat between the buyer and the dealer on one response.
+  CREATE TABLE IF NOT EXISTS response_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    response_id INTEGER NOT NULL REFERENCES responses(id) ON DELETE CASCADE,
+    sender_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    body        TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_response_messages_response ON response_messages(response_id, id);
 
   -- Reference photos a buyer adds to a request ("this exact spec"). Shown publicly in the Wanted list.
   CREATE TABLE IF NOT EXISTS request_photos (
@@ -237,5 +250,8 @@ function migrate(db) {
   const responseColumns = db.prepare('PRAGMA table_info(responses)').all().map((c) => c.name);
   for (const column of ['feedback', 'feedback_reason', 'feedback_at', 'updated_at', 'withdrawn_at']) {
     if (!responseColumns.includes(column)) db.exec(`ALTER TABLE responses ADD COLUMN ${column} TEXT`);
+  }
+  for (const column of ['buyer_read_id', 'dealer_read_id']) {
+    if (!responseColumns.includes(column)) db.exec(`ALTER TABLE responses ADD COLUMN ${column} INTEGER`);
   }
 }
