@@ -15,7 +15,6 @@ Things we've discussed and want to come back to. Newest ideas at the top of each
 - **Buyer reviews of dealers**, only after a request is marked "found", one review per deal.
 - **Price-drop notice:** email the buyer when a dealer lowers the price on a response they passed on for price.
 - **Dealer directory and homepage dealer strip** — built, switched off (`public/features.js` → `dealerDirectory`).
-- **Square app icon / favicon** from the car logo (the tab and home-screen icons still use the old wheel mark).
 - SMS alerts; a daily digest option for dealer alerts.
 - In-app messaging instead of sharing contact details.
 

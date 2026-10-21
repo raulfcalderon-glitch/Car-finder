@@ -21,7 +21,7 @@ A two-sided marketplace for enthusiast, collector and special-edition cars. Live
 - **Request expiry:** requests close by themselves after 60 days so dealers only see buyers who are still looking. A week before, the buyer gets a "Still looking?" email with a one-click **keep it open** link (no login needed); when it closes they get a reopen link. Reopening gives a fresh 60 days. The check runs at startup and hourly.
 - **Buyer feedback:** buyers mark each response **Interested** (the dealer is emailed; the buyer's contact details are not shared) or **Not for me** with an optional reason (price, spec, condition, found one elsewhere). Dealers see the reaction on the request and on their **My responses** page.
 - **Dealer edits:** dealers can edit a response's price or message while the request is open (buyers see "edited"), or **withdraw** it if the car sold (buyers see it marked withdrawn; it no longer counts).
-- **Link previews:** `og:`/Twitter tags and `public/og-image.png` (1200×630) give a branded card when carsfindme.com is shared; `apple-touch-icon.png` is the home-screen icon.
+- **Link previews:** `og:`/Twitter tags and `public/og-image.png` (1200×630) give a branded card when carsfindme.com is shared; `apple-touch-icon.png` / `icon-192.png` / `icon-512.png` are the app icon (car over "CF"), and `favicon.ico` / `favicon-32.png` the browser-tab icon ("CF"); sources and the script that builds them from the logo are in `brand/`.
 - Buyers get an **email alert** when a dealer responds, and see each response with the dealer's contact details. Dealers only see a buyer's first name and only their own responses, not competitors'.
 
 ## Run it
