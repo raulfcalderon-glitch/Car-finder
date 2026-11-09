@@ -68,6 +68,7 @@ export const PRIVACY_HTML = `
   <li><strong>What you post:</strong> vehicle requests (make, model, years, budget, condition, color, location, notes and any reference photos you add) and dealer responses (messages, prices and photos).</li>
   <li><strong>Messages:</strong> the conversation between a buyer and a dealer about a response. Only the two of them can read it. CarsFindMe admins can view conversations to investigate reports and keep the Service safe.</li>
   <li><strong>Technical information:</strong> your IP address and basic request details, used to keep the Service secure (for example, to block repeated password guessing), and the date you last signed in.</li>
+  <li><strong>Notifications:</strong> if you turn on notifications on a device, we store the address your browser or phone gives us for sending them. Notifications are delivered through your device maker's push service (for example Apple or Google), encrypted so only your device can read them. You can turn them off any time in My profile or your device settings.</li>
   <li><strong>Cookies:</strong> one essential cookie that keeps you signed in. We don't use advertising or tracking cookies.</li>
 </ul>
 

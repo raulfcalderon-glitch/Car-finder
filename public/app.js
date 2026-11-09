@@ -224,8 +224,10 @@ function profilePage() {
       </div>
       <p class="error"></p>
     </div>
+    <div class="profile-notify">${notificationsCard()}</div>
     ${deleteAccountSection()}`;
   bindDeleteAccount();
+  bindNotifications();
   const error = view.querySelector('.error');
   view.querySelector('#avatar-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
@@ -291,6 +293,130 @@ function bindDeleteAccount() {
         <a class="button" href="#/">Back to the homepage</a>
       </div>`;
   });
+}
+
+// ---------- installable app & push notifications ----------
+
+const isIos = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isInstalled = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+let installPrompt = null; // Chrome/Edge/Android: the browser's own "Install app" prompt, saved for our button
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  renderBanner();
+});
+
+function registerServiceWorker() {
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+async function currentSubscription() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+
+async function turnOnNotifications() {
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') throw new Error('Notifications were not allowed. You can allow them in your browser or phone settings.');
+  const reg = await navigator.serviceWorker.ready;
+  const { publicKey } = await api('/api/push/key');
+  const key = Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+  const subscription = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }));
+  await api('/api/push/subscribe', { method: 'POST', body: { subscription: subscription.toJSON() } });
+}
+
+async function turnOffNotifications() {
+  const subscription = await currentSubscription();
+  if (!subscription) return;
+  await api('/api/push/unsubscribe', { method: 'POST', body: { endpoint: subscription.endpoint } });
+  await subscription.unsubscribe();
+}
+
+const INSTALL_STEPS_IOS = `Open carsfindme.com in <strong>Safari</strong>, tap the <strong>Share</strong> button
+  <svg class="inline-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>,
+  then <strong>Add to Home Screen</strong>.`;
+
+// On a buyer's request page: a one-line offer to turn notifications on, until they have or say no.
+async function showNotifyNudge() {
+  const box = view.querySelector('#notify-nudge');
+  if (!box || !pushSupported() || Notification.permission !== 'default' || (await currentSubscription())) return;
+  box.innerHTML = `
+    <div class="notify-nudge">
+      <span>🔔 Get a notification the moment a dealer responds or messages you.</span>
+      <button type="button" class="small" id="nudge-on">Turn on</button>
+    </div>`;
+  box.querySelector('#nudge-on').addEventListener('click', async () => {
+    try {
+      await turnOnNotifications();
+      box.innerHTML = '<div class="notify-nudge"><span class="notify-on">✓ Notifications are on for this device.</span></div>';
+    } catch (err) {
+      box.innerHTML = `<div class="notify-nudge"><span class="error">${esc(err.message)}</span></div>`;
+    }
+  });
+}
+
+// "Notifications on this device" card, shown on My profile and the dealer Alerts page.
+function notificationsCard() {
+  const what = me.role === 'dealer'
+    ? 'new buyer requests that match your alerts, buyers marking you Interested, and chat messages'
+    : 'new dealer responses, chat messages, and reminders before a request closes';
+  return `
+    <section class="card notify-card" id="notify-card">
+      <h2>Notifications on this device</h2>
+      <p class="muted">Get an instant alert for ${what}. Emails keep coming too.</p>
+      <div id="notify-state"><span class="muted">Checking…</span></div>
+      <p class="error" id="notify-error"></p>
+    </section>`;
+}
+
+async function bindNotifications() {
+  const box = view.querySelector('#notify-state');
+  if (!box) return;
+  const error = view.querySelector('#notify-error');
+  const draw = async () => {
+    error.textContent = '';
+    if (!pushSupported()) {
+      box.innerHTML = isIos() && !isInstalled()
+        ? `<p>On iPhone and iPad, notifications work in the <strong>CarsFindMe app</strong>. Install it first (it's free and takes a few seconds):</p>
+           <p class="install-steps">${INSTALL_STEPS_IOS}</p>
+           <p class="hint">Then open CarsFindMe from your Home Screen, sign in, and turn notifications on here.</p>`
+        : '<p class="muted">This browser doesn\'t support notifications. Try Chrome, Edge, Firefox or Safari, or install the app on your phone.</p>';
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      box.innerHTML = '<p>Notifications are blocked for CarsFindMe on this device. Allow them in your browser or phone settings, then come back here.</p>';
+      return;
+    }
+    const subscription = await currentSubscription();
+    box.innerHTML = subscription
+      ? `<p class="notify-on">✓ Notifications are on for this device.</p>
+         <div class="row"><button type="button" class="secondary small" id="notify-test">Send me a test</button><button type="button" class="link-button" id="notify-off">Turn off</button></div>`
+      : `<button type="button" id="notify-on">Turn on notifications</button>`;
+    box.querySelector('#notify-on')?.addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      try {
+        await turnOnNotifications();
+      } catch (err) {
+        error.textContent = err.message;
+      }
+      draw();
+    });
+    box.querySelector('#notify-off')?.addEventListener('click', async () => {
+      await turnOffNotifications().catch((err) => (error.textContent = err.message));
+      draw();
+    });
+    box.querySelector('#notify-test')?.addEventListener('click', async (e) => {
+      try {
+        await api('/api/push/test', { method: 'POST' });
+        e.target.textContent = 'Sent ✓';
+      } catch (err) {
+        error.textContent = err.message;
+      }
+    });
+  };
+  draw();
 }
 
 // Center-crops a photo to a square and shrinks it for use as a profile picture.
@@ -870,7 +996,9 @@ function alertSettingsPage() {
         <p class="error"></p>
         <div class="row"><button type="submit">Save alert settings</button><span class="muted" id="saved"></span></div>
       </form>
-    </div>`;
+    </div>
+    <div class="alerts-notify">${notificationsCard()}</div>`;
+  bindNotifications();
   const form = view.querySelector('form');
   const sync = () => {
     form.querySelector('.makes-field').hidden = form.mode.value !== 'makes';
@@ -912,9 +1040,43 @@ async function unsubscribePage(params) {
 }
 
 // Reminder for signed-in people who haven't confirmed their email yet.
+const INSTALL_DISMISSED = 'carsfindme:install-dismissed';
+function installBanner() {
+  let dismissed = false;
+  try {
+    dismissed = localStorage.getItem(INSTALL_DISMISSED) === '1';
+  } catch {
+    /* storage unavailable */
+  }
+  if (!me || dismissed || isInstalled() || !(isIos() || installPrompt)) return '';
+  return `
+    <div class="install-banner">
+      <img src="/icon-192.png" alt="" width="40" height="40">
+      <span><strong>Get the CarsFindMe app</strong> for instant notifications. ${
+        installPrompt ? '' : `<span class="install-steps">Tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</span>`
+      }</span>
+      ${installPrompt ? '<button class="small" id="install-app">Install</button>' : ''}
+      <button class="link-button" id="install-dismiss" aria-label="Dismiss">Not now</button>
+    </div>`;
+}
+
 function renderBanner() {
   if (!me || me.emailVerified) {
-    banner.innerHTML = '';
+    banner.innerHTML = installBanner();
+    banner.querySelector('#install-app')?.addEventListener('click', async () => {
+      installPrompt.prompt();
+      await installPrompt.userChoice;
+      installPrompt = null;
+      renderBanner();
+    });
+    banner.querySelector('#install-dismiss')?.addEventListener('click', () => {
+      try {
+        localStorage.setItem(INSTALL_DISMISSED, '1');
+      } catch {
+        /* storage unavailable */
+      }
+      renderBanner();
+    });
     return;
   }
   banner.innerHTML = `
@@ -1391,6 +1553,7 @@ async function requestDetail(id, params = new URLSearchParams()) {
           : ''
       }
     </div>
+    ${isOwner ? '<div id="notify-nudge"></div>' : ''}
     <h2 style="margin-top:24px">${seesContacts ? `Dealer responses (${responses.filter((x) => !x.withdrawn).length})` : 'Your responses'}</h2>
     ${
       isOwner && responses.length
@@ -1476,6 +1639,7 @@ async function requestDetail(id, params = new URLSearchParams()) {
   });
   bindResponseActions(responses);
   bindChats(params.get('chat'));
+  showNotifyNudge();
 
   const form = view.querySelector('#response-form');
   if (form) {
@@ -2271,9 +2435,11 @@ async function editDealerProfile() {
         }
         <p class="error" id="gallery-error"></p>
       </section>
+      ${notificationsCard()}
       ${deleteAccountSection()}
     </div>`;
   bindDeleteAccount();
+  bindNotifications();
 
   // Specialties as removable chips, with make suggestions.
   const chips = view.querySelector('#chips');
@@ -3198,5 +3364,6 @@ window.addEventListener('hashchange', render);
 // Shared profile links (carsfindme.com/d/<slug>) open the profile inside the app.
 const shared = location.pathname.match(/^\/d\/([a-z0-9-]+)\/?$/);
 if (shared) history.replaceState(null, '', `/#/dealer/${shared[1]}`);
+registerServiceWorker();
 me = (await api('/api/me')).account;
 render();

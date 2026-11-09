@@ -10,12 +10,12 @@ Things we've discussed and want to come back to. Newest ideas at the top of each
   - Many of these come from specialists and private collectors rather than car dealers, so we may want a "parts specialist" dealer type with its own verification checklist.
   - Separate Wanted list tab (Cars / Parts), dealer alerts by category, and a filter on the dealer Requests page.
 - **AI request check.** On posting, catch impossible combinations (e.g. "1985 Porsche 993"), understand shorthand ("E46 M3", "air-cooled 911") and fill fields from one sentence. Suggest, never change silently. Estimated cost a fraction of a cent per request. Hold until there are real requests to learn from.
-- **App:** first an installable web app (home-screen icon, push notifications for new responses and alerts), later an App Store app (needs Apple Developer account, Sign in with Apple, in-app account deletion, an LLC for a company listing).
+- **App Store app:** the installable web app with push notifications is done; a real App Store listing still needs an Apple Developer account ($99/yr), Sign in with Apple (since we offer Google sign-in), a native wrapper (e.g. Capacitor) and ideally the LLC for a company listing. Account deletion is already in place.
 - **Buyer reviews of dealers**, only after a request is marked "found", one review per deal.
 - **Price-drop notice:** email the buyer when a dealer lowers the price on a response they passed on for price.
 - **Dealer directory and homepage dealer strip** — built, switched off (`public/features.js` → `dealerDirectory`).
 - SMS alerts; a daily digest option for dealer alerts.
-- Chat extras: typing/read receipts, push notifications for new messages (with the installable app).
+- Chat extras: typing/read receipts.
 
 ## Business
 

@@ -159,6 +159,26 @@ const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_response_messages_response ON response_messages(response_id, id);
 
+  -- Devices that turned on notifications (Web Push). Forgotten when the push service says they're gone.
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    endpoint     TEXT NOT NULL UNIQUE,
+    p256dh       TEXT NOT NULL,
+    auth         TEXT NOT NULL,
+    user_agent   TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    last_sent_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_push_subscriptions_account ON push_subscriptions(account_id);
+
+  -- Small app-wide settings, e.g. the push signing keys, created on first start.
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
   -- Photos sent in a chat message.
   CREATE TABLE IF NOT EXISTS message_photos (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

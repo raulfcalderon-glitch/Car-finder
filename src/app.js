@@ -22,6 +22,7 @@ import {
 import { REQUEST_LIFETIME_DAYS, REMINDER_DAYS_BEFORE } from './db.js';
 import { createLimiter } from './ratelimit.js';
 import { googleCertsFetcher, verifyGoogleIdToken } from './google.js';
+import { generateVapidKeys, sendPush } from './push.js';
 import { normalizeMake } from '../public/vehicles.js';
 import { FEATURES } from '../public/features.js';
 import {
@@ -73,6 +74,7 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
 class HttpError extends Error {
@@ -557,6 +559,8 @@ export function createApp(
     uploadsDir = null, // where dealer photos are stored; photos are disabled without it
     googleClientId = null, // turns on "Continue with Google" for buyers
     dealerDirectory = FEATURES.dealerDirectory,
+    pushFetch = fetch, // how push messages are delivered (tests pass a fake)
+    pushSubject = 'mailto:hello@carsfindme.com', // who push services can contact about our messages
     fetchGoogleCerts = googleCertsFetcher(),
   } = {},
 ) {
@@ -628,6 +632,12 @@ export function createApp(
         q.setAlertToken.run(dealer.alert_token, dealer.id);
       }
       if (dealer.is_demo) continue;
+      pushTo(dealer.id, {
+        title: `New request: ${vehicleTitle(request)}`,
+        body: [request.max_budget != null && `Budget up to ${money(request.max_budget)}`, request.location].filter(Boolean).join(' · ') || 'A buyer is looking for this car.',
+        url: `/#/request/${request.id}`,
+        tag: `request-${request.id}`,
+      });
       notify(
         newRequestAlertEmail({
           dealer,
@@ -640,6 +650,41 @@ export function createApp(
       );
     }
   }
+
+  // ---------- push notifications ----------
+
+  // Our push signing keys: made once and kept in the database, so nothing needs configuring.
+  const vapidKeys = (() => {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'vapid'").get();
+    if (row) return JSON.parse(row.value);
+    const keys = generateVapidKeys();
+    db.prepare("INSERT INTO app_settings (key, value) VALUES ('vapid', ?)").run(JSON.stringify(keys));
+    return keys;
+  })();
+  const pushQ = {
+    forAccount: db.prepare('SELECT * FROM push_subscriptions WHERE account_id = ?'),
+    upsert: db.prepare(`
+      INSERT INTO push_subscriptions (account_id, endpoint, p256dh, auth, user_agent) VALUES (:account, :endpoint, :p256dh, :auth, :ua)
+      ON CONFLICT(endpoint) DO UPDATE SET account_id = :account, p256dh = :p256dh, auth = :auth, user_agent = :ua`),
+    remove: db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ? AND account_id = ?'),
+    forget: db.prepare('DELETE FROM push_subscriptions WHERE id = ?'),
+    sent: db.prepare("UPDATE push_subscriptions SET last_sent_at = datetime('now') WHERE id = ?"),
+  };
+
+  // Sends a notification to every device the account turned notifications on for. Like emails,
+  // this happens after the reply and never fails a request.
+  function pushTo(accountId, { title, body, url, tag }) {
+    for (const s of pushQ.forAccount.all(accountId)) {
+      const subscription = { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } };
+      sendPush(subscription, { title, body: String(body ?? '').slice(0, 180), url, tag }, { keys: vapidKeys, subject: pushSubject, fetchImpl: pushFetch })
+        .then((r) => (r.gone ? pushQ.forget.run(s.id) : r.ok && pushQ.sent.run(s.id)))
+        .catch((err) => console.error('Push failed:', err.message));
+    }
+  }
+
+  const vehicleTitle = (r) =>
+    [r.year_min && r.year_min === r.year_max ? r.year_min : null, r.make, r.model, r.trim].filter(Boolean).join(' ');
+  const money = (n) => `$${Number(n).toLocaleString('en-US')}`;
 
   // Emails go out after the HTTP reply, so a slow or failing provider never blocks or breaks a request.
   function notify(email) {
@@ -1119,6 +1164,12 @@ export function createApp(
     const reminded = q.requestsToRemind.all();
     for (const request of reminded) {
       q.markReminded.run(request.id);
+      pushTo(request.user_id, {
+        title: `Still looking for a ${vehicleTitle(request)}?`,
+        body: 'Your request closes in a week. Tap to keep it open.',
+        url: `/#/request/${request.id}`,
+        tag: `request-${request.id}`,
+      });
       notify(
         requestExpiringEmail({
           buyer: q.accountById.get(request.user_id),
@@ -1440,6 +1491,42 @@ export function createApp(
       startSession(res, account.id, 200, { account: publicAccount(account) });
     }],
 
+    // --- push notifications ---
+
+    ['GET', /^\/api\/push\/key$/, async (req, res) => {
+      sendJson(res, 200, { publicKey: vapidKeys.publicKey });
+    }],
+
+    // A device turns notifications on (the browser's PushSubscription, as JSON).
+    ['POST', /^\/api\/push\/subscribe$/, async (req, res) => {
+      const account = requireAccount(req);
+      const { subscription } = await readJson(req);
+      const endpoint = str(subscription?.endpoint, 'Endpoint', { required: true, max: 1000 });
+      if (!/^https:\/\//.test(endpoint)) throw new HttpError(400, 'Invalid subscription');
+      const p256dh = str(subscription?.keys?.p256dh, 'Key', { required: true, max: 200 });
+      const auth = str(subscription?.keys?.auth, 'Key', { required: true, max: 100 });
+      if (Buffer.from(p256dh, 'base64url').length !== 65 || Buffer.from(auth, 'base64url').length !== 16) {
+        throw new HttpError(400, 'Invalid subscription');
+      }
+      pushQ.upsert.run({ account: account.id, endpoint, p256dh, auth, ua: String(req.headers['user-agent'] ?? '').slice(0, 300) });
+      sendJson(res, 201, { ok: true });
+    }],
+
+    ['POST', /^\/api\/push\/unsubscribe$/, async (req, res) => {
+      const account = requireAccount(req);
+      pushQ.remove.run(String((await readJson(req)).endpoint ?? ''), account.id);
+      sendJson(res, 200, { ok: true });
+    }],
+
+    // "Send me a test" from the notification settings.
+    ['POST', /^\/api\/push\/test$/, async (req, res) => {
+      const account = requireAccount(req);
+      const devices = pushQ.forAccount.all(account.id).length;
+      if (!devices) throw new HttpError(400, 'Notifications are not turned on for any of your devices yet');
+      pushTo(account.id, { title: 'CarsFindMe notifications are on', body: "This is a test. You'll get alerts like this for new responses and messages.", url: '/#/', tag: 'test' });
+      sendJson(res, 200, { devices });
+    }],
+
     // Settings the browser needs before anyone signs in.
     ['GET', /^\/api\/config$/, async (req, res) => {
       sendJson(res, 200, { googleClientId });
@@ -1513,6 +1600,13 @@ export function createApp(
       for (const photo of photos) q.insertMessagePhoto.run(messageId, await storeImage(photo));
       markRead(response.id, side);
       sendJson(res, 201, { messages: threadMessages(response.id, account) });
+      const senderName = side === 'buyer' ? account.name.split(/\s+/)[0] : account.business_name || account.name;
+      pushTo(other.id, {
+        title: `${senderName} · ${vehicleTitle(request)}`,
+        body: body || `Sent ${photos.length === 1 ? 'a photo' : `${photos.length} photos`}`,
+        url: `/#/request/${request.id}?chat=${response.id}`,
+        tag: `chat-${response.id}`,
+      });
       if (!alreadyWaiting) {
         notify(newMessageEmail({
           to: other.email,
@@ -1817,6 +1911,12 @@ export function createApp(
       const updated = q.responseById.get(response.id);
       sendJson(res, 200, { response: withPhotos(updated) });
       if (feedback === 'interested' && response.feedback !== 'interested') {
+        pushTo(response.dealer_id, {
+          title: `${account.name.split(/\s+/)[0]} is interested`,
+          body: `In your response to their ${vehicleTitle(request)} request.`,
+          url: `/#/request/${request.id}`,
+          tag: `response-${response.id}`,
+        });
         notify(
           responseInterestEmail({
             dealer: q.accountById.get(response.dealer_id),
@@ -1974,6 +2074,12 @@ export function createApp(
       const response = q.responseById.get(lastInsertRowid);
       const names = await savePhotos(response.id, photos);
       sendJson(res, 201, { response: serializeResponse(response, names) });
+      pushTo(request.user_id, {
+        title: `${account.business_name || account.name} responded`,
+        body: `${vehicleTitle(request)}${price != null ? ` · ${money(price)}` : ''}: ${message}`,
+        url: `/#/request/${request.id}`,
+        tag: `response-${response.id}`,
+      });
       notify(
         newResponseEmail({
           request,

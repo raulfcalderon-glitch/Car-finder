@@ -22,6 +22,13 @@ function googleToken(claims, { key = googleKey.privateKey, kid = 'test-key' } = 
   return `${body}.${sign('RSA-SHA256', Buffer.from(body), key).toString('base64url')}`;
 }
 const sentEmails = [];
+// A fake push service: records each notification, and answers with `pushStatus` (e.g. 410 = device gone).
+const pushed = [];
+let pushStatus = 201;
+const pushFetch = async (url, opts) => {
+  pushed.push({ url, ...opts });
+  return { ok: pushStatus < 300, status: pushStatus };
+};
 let failNextEmail = false;
 
 before(async () => {
@@ -43,6 +50,7 @@ before(async () => {
     uploadsDir,
     googleClientId: 'test-client.apps.googleusercontent.com',
     dealerDirectory: true, // switched off on the live site, but kept working
+    pushFetch,
     fetchGoogleCerts: async () => ({ keys: [googleJwk] }),
     // Tests create many accounts from one address; keep the real login limits so they're tested.
     limits: { signupPerIp: { max: 10_000, windowMs: 60_000 }, emailPerIp: { max: 10_000, windowMs: 60_000 } },
@@ -1582,4 +1590,87 @@ test('chat messages can include photos', async () => {
   const shown = (await buyer('GET', `/api/requests/${request.id}`)).body.responses[0].messages;
   assert.equal(shown[0].photos.length, 2);
   assert.equal((await fetch(base + shown[0].photos[0])).status, 200);
+});
+
+test('devices can turn on push notifications and get them for responses and messages', async () => {
+  const { createECDH, createHmac, createDecipheriv, randomBytes } = await import('node:crypto');
+  const hmac = (k, d) => createHmac('sha256', k).update(d).digest();
+  // A fake phone: its own keys, so we can decrypt what the server sends like a real device would.
+  const phone = () => {
+    const ecdh = createECDH('prime256v1');
+    const pub = ecdh.generateKeys();
+    const auth = randomBytes(16);
+    const endpoint = `https://push.example.com/${randomBytes(6).toString('hex')}`;
+    const read = (body) => {
+      const salt = body.subarray(0, 16), idlen = body[20], asPub = body.subarray(21, 21 + idlen), ct = body.subarray(21 + idlen);
+      const ikm = hmac(hmac(auth, ecdh.computeSecret(asPub)), Buffer.concat([Buffer.from('WebPush: info\0'), pub, asPub, Buffer.from([1])]));
+      const prk = hmac(salt, ikm);
+      const d = createDecipheriv('aes-128-gcm', hmac(prk, Buffer.from('Content-Encoding: aes128gcm\0\x01')).subarray(0, 16), hmac(prk, Buffer.from('Content-Encoding: nonce\0\x01')).subarray(0, 12));
+      d.setAuthTag(ct.subarray(ct.length - 16));
+      return JSON.parse(Buffer.concat([d.update(ct.subarray(0, ct.length - 16)), d.final()]).subarray(0, -1).toString());
+    };
+    return { subscription: { endpoint, keys: { p256dh: pub.toString('base64url'), auth: auth.toString('base64url') } }, read };
+  };
+  const sentTo = (endpoint) => pushed.filter((x) => x.url === endpoint);
+
+  const buyer = await signup('user', { name: 'Push Buyer' });
+  const dealer = await signup('dealer', { businessName: 'Push Motors' });
+  const buyerPhone = phone(), dealerPhone = phone();
+
+  const key = (await client()('GET', '/api/push/key')).body.publicKey;
+  assert.equal(Buffer.from(key, 'base64url').length, 65);
+  assert.equal((await client()('POST', '/api/push/subscribe', { subscription: buyerPhone.subscription })).status, 401);
+  assert.equal((await buyer('POST', '/api/push/subscribe', { subscription: { endpoint: 'http://insecure', keys: buyerPhone.subscription.keys } })).status, 400);
+  assert.equal((await buyer('POST', '/api/push/subscribe', { subscription: buyerPhone.subscription })).status, 201);
+  assert.equal((await dealer('POST', '/api/push/subscribe', { subscription: dealerPhone.subscription })).status, 201);
+
+  // Dealer alert for a new request, then the buyer hears about the response, then chat.
+  const { request } = (await buyer('POST', '/api/requests', { make: 'Porsche', model: 'Push 993', yearMin: 1997, yearMax: 1997, maxBudget: 150000 })).body;
+  await tick();
+  const alert = dealerPhone.read(sentTo(dealerPhone.subscription.endpoint).at(-1).body);
+  assert.equal(alert.title, 'New request: 1997 Porsche Push 993');
+  assert.equal(alert.url, `/#/request/${request.id}`);
+
+  const { response } = (await dealer('POST', `/api/requests/${request.id}/responses`, { message: 'Have one in Arena Red', price: 140000 })).body;
+  await tick();
+  const delivery = sentTo(buyerPhone.subscription.endpoint).at(-1);
+  assert.match(delivery.headers.Authorization, /^vapid t=.+, k=/);
+  assert.equal(delivery.headers['Content-Encoding'], 'aes128gcm');
+  const note = buyerPhone.read(delivery.body);
+  assert.equal(note.title, 'Push Motors responded');
+  assert.match(note.body, /\$140,000: Have one in Arena Red/);
+
+  await buyer('POST', `/api/responses/${response.id}/messages`, { body: 'Still available?' });
+  await tick();
+  const chat = dealerPhone.read(sentTo(dealerPhone.subscription.endpoint).at(-1).body);
+  assert.equal(chat.title, 'Push · 1997 Porsche Push 993');
+  assert.equal(chat.body, 'Still available?');
+  assert.equal(chat.url, `/#/request/${request.id}?chat=${response.id}`);
+
+  // Test button, then turning off.
+  assert.equal((await buyer('POST', '/api/push/test')).body.devices, 1);
+  assert.equal((await buyer('POST', '/api/push/unsubscribe', { endpoint: buyerPhone.subscription.endpoint })).status, 200);
+  assert.equal((await buyer('POST', '/api/push/test')).status, 400);
+
+  // A device the push service says is gone (410) is forgotten.
+  pushStatus = 410;
+  await buyer('POST', `/api/responses/${response.id}/messages`, { body: 'Hello again' });
+  await tick();
+  pushStatus = 201;
+  const before = sentTo(dealerPhone.subscription.endpoint).length;
+  await buyer('POST', `/api/responses/${response.id}/messages`, { body: 'Anyone there?' });
+  await tick();
+  assert.equal(sentTo(dealerPhone.subscription.endpoint).length, before, 'no more pushes to a gone device');
+});
+
+test('the app manifest and service worker are served', async () => {
+  const manifest = await fetch(`${base}/manifest.webmanifest`);
+  assert.equal(manifest.status, 200);
+  assert.match(manifest.headers.get('content-type'), /application\/manifest\+json/);
+  const m = await manifest.json();
+  assert.equal(m.display, 'standalone');
+  assert.ok(m.icons.some((i) => i.purpose === 'maskable'));
+  const sw = await fetch(`${base}/sw.js`);
+  assert.equal(sw.status, 200);
+  assert.match(await sw.text(), /addEventListener\('push'/);
 });
