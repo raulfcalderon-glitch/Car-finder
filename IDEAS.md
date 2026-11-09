@@ -19,6 +19,6 @@ Things we've discussed and want to come back to. Newest ideas at the top of each
 
 ## Business
 
-- Microsoft 365 mailbox for carsfindme.com: waiting on Microsoft support to release the domain from the previous owner's tenant. Turn off Cloudflare Email Routing before adding Microsoft's records.
+- Email: carsfindme.com mail runs on Google Workspace (MX, SPF, DKIM `google._domainkey` set in Cloudflare; Cloudflare Email Routing and Microsoft 365 abandoned). DMARC added as `p=none` (monitor); switch to `p=quarantine` after ~2 weeks of clean reports. Optional cleanup: delete the old `MS=ms…` and `cf2024-1._domainkey` TXT records.
 - Form the LLC; have a lawyer review the Terms and Privacy Policy and remove the "Draft" labels.
 - Have a designer polish the final logo before printing merch or filing a trademark.
